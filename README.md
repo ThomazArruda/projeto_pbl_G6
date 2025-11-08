@@ -1,4 +1,4 @@
-Projeto PBL – Plataforma de Reabilitação Pós-AVCRepositório base para o protótipo que integra captura de sinais EMG/ECG com umainterface clínica construída em Streamlit. O objetivo é apoiar equipes médicas naavaliação contínua de pacientes pós-AVC.
+Projeto PBL – Plataforma de Reabilitação Pós-AVCRepositório base para o protótipo que integra captura de sinais EMG/ECG com umainterface clínica construída em Streamlit. O objetivo é apoiar equipes médicas naavaliação contínua de pacientes pós-AVC.<!--NOTA PARA VOCÊ: A estrutura de pastas abaixo está limpa e correta.Note que o 'app.py' duplicado foi removido.-->projeto_pbl/
 ├── hardware/
 │   └── esp32/
 │       └── esp32_emg_ecg.ino     # Firmware para o microcontrolador

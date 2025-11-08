@@ -8,6 +8,12 @@ from software.dashboard import database
 # Inicializa o banco de dados local e garante pacientes de demonstração
 database.init_db()
 database.seed_patients(["Paciente_A", "Paciente_B", "Paciente_C"])
+import datetime
+import json
+from pathlib import Path
+
+DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # --- Configuração da Página ---
 st.set_page_config(
@@ -97,6 +103,18 @@ def ensure_patient_state():
         st.session_state.current_patient_id = patients[0]["id"]
 
     return st.session_state.current_patient_id, patients
+def load_session_data(patient_file: Path):
+    """Carrega os dados de sessão de um arquivo JSON."""
+    if patient_file.exists():
+        with patient_file.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"sessions": []}
+
+
+def save_session_data(patient_file: Path, session_data):
+    """Salva os dados da sessão em um arquivo JSON."""
+    with patient_file.open("w", encoding="utf-8") as f:
+        json.dump(session_data, f, indent=4, ensure_ascii=False)
 
 # --- Inicialização do Estado ---
 if 'session_data' not in st.session_state:
@@ -117,6 +135,8 @@ current_patient_name = next(
     (p["name"] for p in patients if p["id"] == current_patient_id),
     "Paciente"
 )
+if 'current_patient' not in st.session_state:
+    st.session_state.current_patient = "Paciente_A"
 
 # --- Barra Lateral (Sidebar) ---
 with st.sidebar:
@@ -151,6 +171,17 @@ with st.sidebar:
     # Carregar dados históricos do paciente
     sessions = database.get_sessions(current_patient_id)
     session_dates = [s["date"] for s in sessions]
+    patient_list = ["Paciente_A", "Paciente_B", "Paciente_C"]
+    st.session_state.current_patient = st.selectbox(
+        "Selecionar Paciente", 
+        patient_list,
+        index=patient_list.index(st.session_state.current_patient)
+    )
+    patient_file = DATA_DIR / f"{st.session_state.current_patient}.json"
+
+    # Carregar dados históricos do paciente
+    db = load_session_data(patient_file)
+    session_dates = [s["date"] for s in db["sessions"]]
     session_dates.insert(0, "Sessão Atual (Ao Vivo)")
 
     st.divider()
@@ -179,6 +210,12 @@ with st.sidebar:
         # Salvar os dados
         if st.session_state.session_data["time"]: # Só salvar se houver dados
             database.add_session(current_patient_id, st.session_state.session_data)
+            new_session = {
+                "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "data": st.session_state.session_data
+            }
+            db["sessions"].append(new_session)
+            save_session_data(patient_file, db)
             st.success("Sessão salva com sucesso!")
             time.sleep(2)
             st.experimental_rerun()
@@ -187,6 +224,7 @@ with st.sidebar:
 
 # --- Título Principal ---
 st.title(f"Plataforma de Reabilitação Pós-AVC - {current_patient_name}")
+st.title(f"Plataforma de Reabilitação Pós-AVC - {st.session_state.current_patient}")
 st.caption(f"Visualizando: {selected_session}")
 
 # --- Lógica de Exibição ---
@@ -221,6 +259,7 @@ if selected_session == "Sessão Atual (Ao Vivo)":
         history_list = ""
         # Limitar a 5 sessões
         for s in sessions[:5]:
+        for s in reversed(db["sessions"][-5:]):
             # Calcular média simples para o indicador
             avg_le_q = np.mean(s["data"]["le_quad"]) if s["data"]["le_quad"] else 0
             avg_ri_q = np.mean(s["data"]["ri_quad"]) if s["data"]["ri_quad"] else 0
@@ -306,6 +345,7 @@ else:
 
     # Encontrar os dados da sessão selecionada
     session_to_display = next((s for s in sessions if s["date"] == selected_session), None)
+    session_to_display = next((s for s in db["sessions"] if s["date"] == selected_session), None)
 
     if session_to_display:
         data = session_to_display["data"]
@@ -340,6 +380,7 @@ else:
             # Gráfico de evolução das médias
             evolution_data = []
             for s in sessions:
+            for s in db["sessions"]:
                 avg_val = np.mean(s["data"]["le_quad"]) # Evolução do Quadríceps Esquerdo
                 evolution_data.append({"date": s["date"], "progress": avg_val})
             

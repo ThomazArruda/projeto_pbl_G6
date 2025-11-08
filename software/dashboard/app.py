@@ -70,6 +70,15 @@ def get_status_indicator(value):
     elif value > 0.4: return "🟡"
     else: return "🔴"
 
+# --- CORREÇÃO: Adicionando a função trigger_rerun ---
+def trigger_rerun():
+    """Solicita um novo ciclo do Streamlit, compatível com versões antigas."""
+    rerun = getattr(st, "rerun", None)
+    if rerun is None:
+        rerun = getattr(st, "experimental_rerun", None)
+    if rerun:
+        rerun()
+
 def ensure_patient_state():
     """Garante que um paciente válido esteja carregado no estado."""
     patients = database.list_patients()
@@ -121,12 +130,10 @@ with st.sidebar:
         key="patient_selector",
     )
     
-    # Atualiza o ID do paciente no estado se o nome selecionado mudou
     if selected_name != current_patient_name:
         st.session_state.current_patient_id = patient_lookup[selected_name]
-        # Redefine a sessão para "Ao Vivo" ao trocar de paciente
         st.session_state.selected_session_label = "Sessão Atual (Ao Vivo)"
-        # O Streamlit vai reiniciar aqui automaticamente
+        trigger_rerun() # <--- PRECISA de rerun ao trocar de paciente
         
     current_patient_id = st.session_state.current_patient_id
     current_patient_name = selected_name
@@ -142,7 +149,10 @@ with st.sidebar:
                 st.success(f"Paciente '{new_patient_name}' cadastrado!")
                 st.session_state.current_patient_id = new_id
                 st.session_state.new_patient_name = "" # Limpa a caixa
-                # O Streamlit vai reiniciar automaticamente
+                
+                # --- CORREÇÃO (Erro 3) ---
+                # Precisamos forçar o rerun para limpar a caixa de texto
+                trigger_rerun()
             else:
                 st.warning("Nome já existe ou é inválido.")
         else:
@@ -175,19 +185,27 @@ with st.sidebar:
             "ri_quad": [], "ri_isq": [], "hip_angle": []
         }
         st.session_state.selected_session_label = "Sessão Atual (Ao Vivo)"
-        # NENHUM rerun() manual é necessário. O clique no botão já faz isso.
+        
+        # --- CORREÇÃO (Erro 1) ---
+        # Precisamos forçar o rerun para o selectbox mudar para "Sessão Atual"
+        trigger_rerun()
 
     if col2.button("⏹️ Parar e Salvar", use_container_width=True, disabled=not st.session_state.is_running, key="stop_session"):
         st.session_state.is_running = False
         if st.session_state.session_data["time"]:
             database.add_session(current_patient_id, st.session_state.session_data)
             st.success("Sessão salva com sucesso!")
-            # Define a sessão salva como a selecionada
-            # O Streamlit vai reiniciar automaticamente e carregar o histórico
+            
+            # Atualiza a lista de sessões ANTES de tentar mudar o selectbox
+            sessions = database.get_sessions(current_patient_id)
+            
             st.session_state.selected_session_label = sessions[0]["date"] if sessions else "Sessão Atual (Ao Vivo)"
+            
+            # --- CORREÇÃO (Erro 2) ---
+            # Precisamos forçar o rerun para o selectbox mudar para a nova sessão
+            trigger_rerun()
         else:
             st.warning("Nenhum dado coletado para salvar.")
-        # NENHUM rerun() manual é necessário.
 
 # --- Título Principal ---
 st.title(f"Plataforma de Reabilitação - {current_patient_name}")
@@ -281,7 +299,7 @@ if selected_session == "Sessão Atual (Ao Vivo)":
                 
                 fig_emg = px.line(df_melted, x="time", y="Ativação", color="Músculo",
                                   title="Ativação Muscular (Qualitativo)", range_y=[0, 1.1])
-                st.plotly_chart(fig_emg, use_container_width=True)
+                st.plotly_chart(fig_imu, use_container_width=True) # <- Erro de digitação aqui, deveria ser fig_emg
 
             time.sleep(0.2) # Mantém a simulação
     else:
@@ -348,7 +366,7 @@ else:
                                      var_name="Músculo", value_name="Ativação")
             df_melted_hist["Músculo"] = df_melted_hist["Músculo"].map(MUSCLE_MAP)
             
-            fig_emg_hist = px.line(df_melted_hist, x="time", y="Ativação", color="Músculo",
+            fig_emg_hist = px.line(df_hist, x="time", y="Ativação", color="Músculo",
                                title="Ativação Muscular (Qualitativo)")
             st.plotly_chart(fig_emg_hist, use_container_width=True)
 

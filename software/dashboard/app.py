@@ -380,9 +380,9 @@ else:
             # Gráfico de evolução das médias
             evolution_data = []
             for s in sessions:
-            for s in db["sessions"]:
-                avg_val = np.mean(s["data"]["le_quad"]) # Evolução do Quadríceps Esquerdo
-                evolution_data.append({"date": s["date"], "progress": avg_val})
+                for s in db["sessions"]:
+                    avg_val = np.mean(s["data"]["le_quad"]) # Evolução do Quadríceps Esquerdo
+                    evolution_data.append({"date": s["date"], "progress": avg_val})
             
             if evolution_data:
                 df_evo = pd.DataFrame(evolution_data)

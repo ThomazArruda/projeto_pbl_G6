@@ -7,6 +7,9 @@ import datetime
 import json
 from pathlib import Path
 
+DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
 # --- Configuração da Página ---
 st.set_page_config(
     page_title="Reabilitação Pós-AVC",
@@ -79,19 +82,18 @@ def get_status_indicator(value):
     else:
         return "🔴"
 
-def load_session_data(patient_file):
+def load_session_data(patient_file: Path):
     """Carrega os dados de sessão de um arquivo JSON."""
-    p_file = Path(patient_file)
-    if p_file.exists():
-        with p_file.open("r") as f:
+    if patient_file.exists():
+        with patient_file.open("r", encoding="utf-8") as f:
             return json.load(f)
     return {"sessions": []}
 
-def save_session_data(patient_file, session_data):
+
+def save_session_data(patient_file: Path, session_data):
     """Salva os dados da sessão em um arquivo JSON."""
-    p_file = Path(patient_file)
-    with p_file.open("w") as f:
-        json.dump(session_data, f, indent=4)
+    with patient_file.open("w", encoding="utf-8") as f:
+        json.dump(session_data, f, indent=4, ensure_ascii=False)
 
 # --- Inicialização do Estado ---
 if 'session_data' not in st.session_state:
@@ -115,7 +117,7 @@ with st.sidebar:
         patient_list,
         index=patient_list.index(st.session_state.current_patient)
     )
-    patient_file = f"data_{st.session_state.current_patient}.json"
+    patient_file = DATA_DIR / f"{st.session_state.current_patient}.json"
 
     # Carregar dados históricos do paciente
     db = load_session_data(patient_file)

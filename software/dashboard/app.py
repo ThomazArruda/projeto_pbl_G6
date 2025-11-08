@@ -274,7 +274,7 @@ if selected_session == "Sessão Atual (Ao Vivo)":
             indicator_le = get_status_indicator(avg_le_q)
             indicator_ri = get_status_indicator(avg_ri_q)
             history_list += f"`{s['date']}` {indicator_le} | {indicator_ri}\n"
-         st.markdown(history_list or "Nenhuma sessão anterior.")
+        st.markdown(history_list or "Nenhuma sessão anterior.")
 
     # Loop de simulação de dados
     if st.session_state.is_running:

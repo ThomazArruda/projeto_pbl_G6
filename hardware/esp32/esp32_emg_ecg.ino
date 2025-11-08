@@ -1,3 +1,7 @@
+// Firmware simples para leitura de um canal ECG (simulando EMG) e um canal EMG.
+// As amostras são transmitidas pela porta serial em formato legível e podem ser
+// consumidas pelo script Python localizado em software/data_capture/serial_plotter.py.
+
 #define ECG_PIN 35   // GPIO35 para ECG
 #define EMG_PIN 34   // GPIO34 para EMG
 

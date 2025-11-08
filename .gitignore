@@ -1,16 +1,40 @@
-# Python
-.venv/
+# Ambiente Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*.so
+*.dylib
+*.pyd
+*.egg-info/
+.eggs/
+build/
+dist/
+.python-version
+.venv/
+venv/
+env/
+ENV/
+.venv
 
-# Dados gerados
-python/data/*.csv
-python/data/*.json
+# Ferramentas e caches
+.mypy_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.ipynb_checkpoints/
 
-# VSCode
+# Streamlit
+.streamlit/
+
+# Dados gerados em tempo de execução
+data/*.json
+data/*.csv
+data/clinic.db
+
+# Configurações de IDE / Sistema
 .vscode/
-
-# SO
+.idea/
+*.swp
+*.swo
 .DS_Store
 Thumbs.db

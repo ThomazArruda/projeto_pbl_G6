@@ -267,14 +267,14 @@ if selected_session == "Sessão Atual (Ao Vivo)":
             indicator_ri = get_status_indicator(avg_ri_q)
             history_list += f"`{s['date']}` {indicator_le} | {indicator_ri}\n"
         st.markdown(history_list or "Nenhuma sessão anterior.")
-            for s in reversed(db["sessions"][-5:]):
-                # Calcular média simples para o indicador
-                avg_le_q = np.mean(s["data"]["le_quad"]) if s["data"]["le_quad"] else 0
-                avg_ri_q = np.mean(s["data"]["ri_quad"]) if s["data"]["ri_quad"] else 0
-                indicator_le = get_status_indicator(avg_le_q)
-                indicator_ri = get_status_indicator(avg_ri_q)
-                history_list += f"`{s['date']}` {indicator_le} | {indicator_ri}\n"
-            st.markdown(history_list or "Nenhuma sessão anterior.")
+                for s in reversed(db["sessions"][-5:]):
+                    # Calcular média simples para o indicador
+                    avg_le_q = np.mean(s["data"]["le_quad"]) if s["data"]["le_quad"] else 0
+                    avg_ri_q = np.mean(s["data"]["ri_quad"]) if s["data"]["ri_quad"] else 0
+                    indicator_le = get_status_indicator(avg_le_q)
+                    indicator_ri = get_status_indicator(avg_ri_q)
+                    history_list += f"`{s['date']}` {indicator_le} | {indicator_ri}\n"
+                st.markdown(history_list or "Nenhuma sessão anterior.")
 
     # Loop de simulação de dados
     if st.session_state.is_running:

@@ -4,6 +4,17 @@ import pandas as pd
 import plotly.express as px
 import time
 from . import database
+import database  # <-- ÚNICA IMPORTAÇÃO CORRETA
+import datetime
+from pathlib import Path
+
+# --- Imports de Hardware REMOVIDOS (serial, collections, scipy) ---
+# (Não precisamos deles agora)
+
+# =============================================================================
+# --- 1. CONFIGURAÇÕES DE HARDWARE REMOVIDAS ---
+# (Voltaremos a elas quando formos integrar o Arduino)
+# =============================================================================
 
 # Inicializa o banco de dados local e garante pacientes de demonstração
 database.init_db()
@@ -64,6 +75,15 @@ def render_metric_box(title, value):
     val_percent = f"{value*100:.1f}%"
     bg, border, text = get_metric_colors(value)
     
+    """Recebe valor 0-1, retorna cores"""
+    if value > 0.7: return "#E6F7EB", "#28A745", "#222222"  # Verde
+    elif value > 0.4: return "#FFFBE6", "#FFC107", "#222222"  # Amarelo
+    else: return "#FFF0F1", "#DC3545", "#222222"  # Vermelho
+
+def render_metric_box(title, value):
+    """Recebe valor 0-1, retorna HTML formatado"""
+    val_percent = f"{value*100:.1f}%"
+    bg, border, text = get_metric_colors(value)
     html = f"""
     <div class="metric-box" style="background-color: {bg}; border-color: {border}; color: {text};">
         <div class="metric-title">{title}</div>
@@ -111,12 +131,49 @@ def ensure_patient_state():
 if 'session_data' not in st.session_state:
     st.session_state.session_data = {
         "time": [], "le_quad": [], "le_isq": [], 
+    if value > 0.7: return "🟢"
+    elif value > 0.4: return "🟡"
+    else: return "🔴"
+
+def trigger_rerun():
+    """Função de compatibilidade para st.rerun()"""
+    if hasattr(st, 'rerun'):
+        st.rerun()
+    elif hasattr(st, 'experimental_rerun'):
+        st.experimental_rerun()
+    else:
+        # Fallback para versões muito antigas (pouco provável)
+        st.legacy_caching.clear_cache()
+
+def ensure_patient_state():
+    """Garante que um paciente válido esteja carregado no estado."""
+    patients = database.list_patients()
+    if not patients:
+        return None, []
+    if "current_patient_id" not in st.session_state:
+        st.session_state.current_patient_id = patients[0]["id"]
+    valid_ids = {p["id"] for p in patients}
+    if st.session_state.current_patient_id not in valid_ids:
+        st.session_state.current_patient_id = patients[0]["id"]
+    return st.session_state.current_patient_id, patients
+
+# --- Funções JSON (load/save_session_data) REMOVIDAS ---
+
+# --- Inicialização do Estado ---
+if 'session_data' not in st.session_state:
+    st.session_state.session_data = {
+        "time": [], "le_quad": [], "le_isq": [],
         "ri_quad": [], "ri_isq": [], "hip_angle": []
     }
 if 'is_running' not in st.session_state:
     st.session_state.is_running = False
 current_patient_id, patients = ensure_patient_state()
 
+
+# --- Buffers de Hardware REMOVIDOS (voltaremos a eles) ---
+
+# --- Carregamento de Pacientes ---
+current_patient_id, patients = ensure_patient_state()
 if current_patient_id is None:
     st.error("Nenhum paciente cadastrado. Adicione um paciente para começar.")
     st.stop()
@@ -125,6 +182,7 @@ patient_lookup = {p["name"]: p["id"] for p in patients}
 current_patient_name = next(
     (p["name"] for p in patients if p["id"] == current_patient_id),
     "Paciente"
+    (p["name"] for p in patients if p["id"] == current_patient_id), "Paciente"
 )
 
 # --- Barra Lateral (Sidebar) ---
@@ -132,6 +190,7 @@ with st.sidebar:
     st.title("Controle da Sessão")
 
     # Seleção de Paciente
+    # --- Seletor de Paciente (ÚNICO e correto) ---
     patient_names = list(patient_lookup.keys())
     current_index = patient_names.index(current_patient_name)
     selected_name = st.selectbox(
@@ -186,6 +245,66 @@ with st.sidebar:
             st.success("Sessão salva com sucesso!")
             sessions = database.get_sessions(current_patient_id)
             if sessions:
+    
+    if selected_name != current_patient_name:
+        st.session_state.current_patient_id = patient_lookup[selected_name]
+        st.session_state.selected_session_label = "Sessão Atual (Ao Vivo)"
+        trigger_rerun()
+    
+    current_patient_id = st.session_state.current_patient_id
+    current_patient_name = selected_name
+
+    # --- Cadastro de Paciente (ÚNICO e correto) ---
+    st.subheader("Cadastrar novo paciente")
+    new_patient_name = st.text_input("Nome completo", key="new_patient_name")
+    if st.button("Adicionar Paciente", use_container_width=True, key="add_patient_button"):
+        if new_patient_name:
+            new_id = database.add_patient(new_patient_name)
+            if new_id:
+                st.success(f"Paciente '{new_patient_name}' cadastrado!")
+                st.session_state.current_patient_id = new_id
+                st.session_state.new_patient_name = ""
+                trigger_rerun()
+            else:
+                st.warning("Nome já existe ou é inválido.")
+        else:
+            st.warning("Informe um nome.")
+    
+    st.caption(f"DB: {database.DB_PATH.name}")
+    st.divider()
+
+    # --- Seletor de Sessão (Baseado em SQLite) ---
+    sessions = database.get_sessions(current_patient_id)
+    session_dates = ["Sessão Atual (Ao Vivo)"] + [s["date"] for s in sessions]
+
+    if "selected_session_label" not in st.session_state or st.session_state.selected_session_label not in session_dates:
+        st.session_state.selected_session_label = session_dates[0]
+
+    selected_session = st.selectbox(
+        "Selecionar Sessão",
+        session_dates,
+        key="selected_session_label",
+    )
+    st.divider()
+
+    # --- Botões de Controle (Baseado em SQLite) ---
+    col1, col2 = st.columns(2)
+    if col1.button("▶️ Iniciar Nova Sessão", use_container_width=True, disabled=st.session_state.is_running, key="start_session"):
+        st.session_state.is_running = True
+        st.session_state.session_data = {k: [] for k in st.session_state.session_data}
+        st.session_state.selected_session_label = "Sessão Atual (Ao Vivo)"
+        trigger_rerun()
+
+    if col2.button("⏹️ Parar e Salvar", use_container_width=True, disabled=not st.session_state.is_running, key="stop_session"):
+        st.session_state.is_running = False
+        if st.session_state.session_data["time"]:
+            # Salva no banco de dados SQLite
+            database.add_session(current_patient_id, st.session_state.session_data)
+            st.success("Sessão salva com sucesso!")
+            # Atualiza a lista de sessões
+            sessions = database.get_sessions(current_patient_id)
+            if sessions:
+                # Seleciona a sessão que acabamos de salvar
                 st.session_state.selected_session_label = sessions[0]["date"]
             trigger_rerun()
         else:
@@ -207,6 +326,8 @@ with st.sidebar:
 
 # --- Título Principal ---
 st.title(f"Plataforma de Reabilitação Pós-AVC - {current_patient_name}")
+# --- Título Principal ---
+st.title(f"Plataforma de Reabilitação - {current_patient_name}")
 st.caption(f"Visualizando: {selected_session}")
 
 # --- Lógica de Exibição ---
@@ -219,6 +340,9 @@ if selected_session == "Sessão Atual (Ao Vivo)":
     graph_placeholder = st.empty()
     metrics_col_left, metrics_col_center, metrics_col_right, metrics_col_history = st.columns([1, 2, 1, 1])
     
+    
+    metrics_col_left, metrics_col_center, metrics_col_right, metrics_col_history = st.columns([1, 2, 1, 1])
+
     with metrics_col_left:
         st.subheader("Perna Esquerda (Parética)")
         metric_le_quad = st.empty()
@@ -231,6 +355,10 @@ if selected_session == "Sessão Atual (Ao Vivo)":
             use_column_width=True
         )
         
+
+    with metrics_col_center:
+        st.image("https://placehold.co/400x500/F0F0F0/333?text=Diagrama+Anat%C3%B4mico", use_column_width=True)
+
     with metrics_col_right:
         st.subheader("Perna Direita (Não Parética)")
         metric_ri_quad = st.empty()
@@ -261,6 +389,26 @@ if selected_session == "Sessão Atual (Ao Vivo)":
         
         # Valores iniciais de "qualidade" do músculo (0 a 1)
         # Perna parética começa mal, perna boa começa bem
+
+    with metrics_col_history:
+        # --- Histórico (Baseado em SQLite) ---
+        st.subheader("Histórico Recente")
+        history_lines = []
+        for s in sessions[:5]: # 'sessions' vem do database.get_sessions()
+            try:
+                avg_le_q = np.mean(s["data"]["le_quad"]) if s["data"].get("le_quad") else 0
+                avg_ri_q = np.mean(s["data"]["ri_quad"]) if s["data"].get("ri_quad") else 0
+            except (KeyError, TypeError):
+                avg_le_q = 0; avg_ri_q = 0
+            indicator_le = get_status_indicator(avg_le_q)
+            indicator_ri = get_status_indicator(avg_ri_q)
+            history_lines.append(f"`{s['date']}` {indicator_le} | {indicator_ri}")
+        st.markdown("\n".join(history_lines) or "Nenhuma sessão anterior.")
+
+    # --- LOOP DE SIMULAÇÃO (O original do seu app) ---
+    if st.session_state.is_running:
+        start_time = time.time()
+        
         le_quad_quality = 0.1
         le_isq_quality = 0.2
         ri_quad_quality = 0.8
@@ -275,6 +423,19 @@ if selected_session == "Sessão Atual (Ao Vivo)":
             le_isq_quality = min(le_isq_quality + 0.002, 1.0)
             
             # Gerar valores de EMG (0-1) baseados na "qualidade"
+        # --- Placeholders para os gráficos (Movidos para dentro do 'is_running') ---
+        # Isso corrige um bug onde os gráficos antigos persistiam
+        st.subheader("Ângulo do Quadril (IMU) - Tempo Real")
+        graph_imu = st.empty()
+
+        st.subheader("Ativação Muscular (EMG) - Tempo Real")
+        graph_emg = st.empty()
+
+        while st.session_state.is_running:
+            # 1. SIMULAR DADOS
+            current_time = time.time() - start_time
+            le_quad_quality = min(le_quad_quality + 0.001, 1.0)
+            le_isq_quality = min(le_isq_quality + 0.002, 1.0)
             le_quad_val = np.clip(np.random.normal(le_quad_quality, 0.1), 0, 1)
             le_isq_val = np.clip(np.random.normal(le_isq_quality, 0.1), 0, 1)
             ri_quad_val = np.clip(np.random.normal(ri_quad_quality, 0.05), 0, 1)
@@ -284,6 +445,9 @@ if selected_session == "Sessão Atual (Ao Vivo)":
             hip_angle_val = 20 * np.sin(current_time * 2) + 10 * np.random.rand()
 
             # Adicionar aos dados da sessão
+            hip_angle_val = 20 * np.sin(current_time * 2) + 5 * np.random.rand()
+            
+            # 2. ADICIONAR DADOS NA SESSÃO
             data = st.session_state.session_data
             data["time"].append(current_time)
             data["le_quad"].append(le_quad_val)
@@ -296,6 +460,7 @@ if selected_session == "Sessão Atual (Ao Vivo)":
             data_tail = {k: v[-50:] for k, v in data.items()}
 
             # Atualizar métricas
+            # 3. ATUALIZAR MÉTRICAS (Semáforos)
             metric_le_quad.markdown(render_metric_box(MUSCLE_MAP["le_quad"], le_quad_val), unsafe_allow_html=True)
             metric_le_isq.markdown(render_metric_box(MUSCLE_MAP["le_isq"], le_isq_val), unsafe_allow_html=True)
             metric_ri_quad.markdown(render_metric_box(MUSCLE_MAP["ri_quad"], ri_quad_val), unsafe_allow_html=True)
@@ -323,6 +488,25 @@ if selected_session == "Sessão Atual (Ao Vivo)":
 
             # Esperar para o próximo "frame"
             time.sleep(0.2)
+            # 4. ATUALIZAR GRÁFICOS (Plotly, com os últimos 50 pontos)
+            data_tail = {k: v[-50:] for k, v in data.items()}
+            df_live = pd.DataFrame(data_tail)
+            
+            with graph_imu.container():
+                fig_imu = px.line(df_live, x="time", y="hip_angle", title="Ângulo do Quadril (°)", range_y=[-30, 40])
+                fig_imu.update_layout(yaxis_title="Ângulo (°)")
+                st.plotly_chart(fig_imu, use_container_width=True)
+            
+            with graph_emg.container():
+                df_melted = df_live.melt(id_vars=["time"], value_vars=list(MUSCLE_MAP.keys()),
+                                         var_name="Músculo", value_name="Ativação")
+                df_melted["Músculo"] = df_melted["Músculo"].map(MUSCLE_MAP)
+                fig_emg = px.line(df_melted, x="time", y="Ativação", color="Músculo",
+                                  title="Ativação Muscular (Qualitativo)", range_y=[0, 1.1])
+                st.plotly_chart(fig_emg, use_container_width=True)
+
+            # 5. PAUSA DA SIMULAÇÃO
+            time.sleep(0.05) # Reduzi a pausa para 50ms (20 FPS)
     else:
         st.info("Pressione 'Iniciar Nova Sessão' para começar o monitoramento ao vivo.")
 
@@ -331,6 +515,8 @@ else:
     st.header(f"Análise da Sessão: {selected_session}")
 
     # Encontrar os dados da sessão selecionada
+    # --- MODO HISTÓRICO (Baseado em SQLite) ---
+    st.header(f"Análise da Sessão: {selected_session}")
     session_to_display = next((s for s in sessions if s["date"] == selected_session), None)
 
     if session_to_display:
@@ -344,6 +530,12 @@ else:
         avg_le_i = np.mean(data["le_isq"])
         avg_ri_q = np.mean(data["ri_quad"])
         avg_ri_i = np.mean(data["ri_isq"])
+        metrics_col_left, metrics_col_center, metrics_col_right, metrics_col_history = st.columns([1, 2, 1, 1])
+        
+        avg_le_q = np.mean(data["le_quad"]) if data.get("le_quad") else 0
+        avg_le_i = np.mean(data["le_isq"]) if data.get("le_isq") else 0
+        avg_ri_q = np.mean(data["ri_quad"]) if data.get("ri_quad") else 0
+        avg_ri_i = np.mean(data["ri_isq"]) if data.get("ri_isq") else 0
 
         with metrics_col_left:
             st.subheader("Perna Esquerda (Parética)")
@@ -356,6 +548,8 @@ else:
                 use_column_width=True
             )
             
+        with metrics_col_center:
+            st.image("https://placehold.co/400x500/F0F0F0/333?text=Diagrama+Anat%C3%B4mico", use_column_width=True)
         with metrics_col_right:
             st.subheader("Perna Direita (Não Parética)")
             st.markdown(render_metric_box(f"{MUSCLE_MAP['ri_quad']} (Média)", avg_ri_q), unsafe_allow_html=True)
@@ -373,6 +567,14 @@ else:
                 df_evo = pd.DataFrame(evolution_data)
                 df_evo["date"] = pd.to_datetime(df_evo["date"])
                 fig_evo = px.line(df_evo, x="date", y="progress", 
+            evolution_data = []
+            for s in reversed(sessions):
+                avg_val = np.mean(s["data"]["le_quad"]) if s["data"].get("le_quad") else 0
+                evolution_data.append({"date": s["date"], "progress": avg_val})
+            if evolution_data:
+                df_evo = pd.DataFrame(evolution_data)
+                df_evo["date"] = pd.to_datetime(df_evo["date"])
+                fig_evo = px.line(df_evo, x="date", y="progress",
                                   title="Progresso - Quadríceps Esquerdo (Média)", markers=True)
                 fig_evo.update_layout(yaxis_title="Qualidade Média", yaxis_range=[0,1])
                 st.plotly_chart(fig_evo, use_container_width=True)
@@ -397,5 +599,23 @@ else:
                           title="Ativação Muscular (Qualitativo)")
         st.plotly_chart(fig_emg_hist, use_container_width=True)
 
+        st.divider()
+        st.subheader("Gráficos Completos da Sessão")
+        
+        if df_hist.empty or not data.get("time"):
+            st.warning("Sessão não contém dados de séries temporais para exibir.")
+        else:
+            st.write("#### Ângulo do Quadril (IMU)")
+            fig_imu_hist = px.line(df_hist, x="time", y="hip_angle", title="Ângulo do Quadril (°)")
+            fig_imu_hist.update_layout(yaxis_title="Ângulo (°)")
+            st.plotly_chart(fig_imu_hist, use_container_width=True)
+
+            st.write("#### Ativação Muscular (EMG)")
+            df_melted_hist = df_hist.melt(id_vars=["time"], value_vars=list(MUSCLE_MAP.keys()),
+                                     var_name="Músculo", value_name="Ativação")
+            df_melted_hist["Músculo"] = df_melted_hist["Músculo"].map(MUSCLE_MAP)
+            fig_emg_hist = px.line(df_melted_hist, x="time", y="Ativação", color="Músculo",
+                               title="Ativação Muscular (Qualitativo)")
+            st.plotly_chart(fig_emg_hist, use_container_width=True)
     else:
         st.error("Não foi possível carregar os dados da sessão selecionada.")

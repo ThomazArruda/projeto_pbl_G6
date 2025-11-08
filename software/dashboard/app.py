@@ -3,8 +3,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import time
-from . import database
-from software.dashboard import database
+import database
 
 # Inicializa o banco de dados local e garante pacientes de demonstração
 database.init_db()

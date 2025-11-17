@@ -1,5 +1,5 @@
 /*
- * FIRMWARE V4 (ALTA PERFORMANCE)
+ * FIRMWARE V5 (ALTA PERFORMANCE)
  *
  * O que ele faz:
  * 1. Remove todos os `delay()` do loop principal.
@@ -9,6 +9,9 @@
  * Giroscópio, obtendo um ângulo estável (Pitch) para cada um.
  * 5. Calcula o Ângulo Relativo (Angulo1 - Angulo2).
  * 6. Envia apenas 3 valores pela serial em um formato rápido: "E:valor,C:valor,A:valor"
+ *
+ * Correção V5: Remove a re-definição de 'RAD_TO_DEG', que já existe na biblioteca
+ * do ESP32 (Arduino.h).
  */
 
 #include <Wire.h>
@@ -34,7 +37,8 @@ float pitch2 = 0; // Ângulo (Pitch) do IMU 2
 unsigned long last_time; // Tempo da última leitura
 
 // --- Constantes do Filtro ---
-const float RAD_TO_DEG = 180.0 / M_PI;
+// <<< CORREÇÃO AQUI: Linha removida. RAD_TO_DEG já é definido por Arduino.h
+// const float RAD_TO_DEG = 180.0 / M_PI; 
 const float COMPL_FILTER_ALPHA = 0.98; // 98% Giroscópio, 2% Acelerômetro
 
 // --- Constantes de Loop (Sem Delay) ---
@@ -44,7 +48,7 @@ unsigned long last_serial_time = 0;
 void setup() {
   Serial.begin(115200);
   while (!Serial) delay(10);
-  Serial.println("--- Firmware V4 (Ângulo Relativo) ---");
+  Serial.println("--- Firmware V5 (Ângulo Relativo) ---");
 
   pinMode(EMG_PIN, INPUT);
   pinMode(ECG_PIN, INPUT);

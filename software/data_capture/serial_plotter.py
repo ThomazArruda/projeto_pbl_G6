@@ -50,7 +50,7 @@ ax[0].legend(loc='upper left')
 # --- Gráfico 2: Ângulo Relativo ---
 ln_angle, = ax[1].plot(x_axis, [0]*WINDOW_SIZE, lw=1, color='green', label='Ângulo Relativo (IMU1 - IMU2)')
 ax[1].set_title('Ângulo Relativo (Quadril vs. Coxa)')
-ax[1].set_ylim(-90, 90) # Limite fixo para ângulo em graus
+ax[1].set_ylim(0, 180) # Limite fixo para ângulo em graus
 ax[1].legend(loc='upper left')
 ax[1].grid(True)
 

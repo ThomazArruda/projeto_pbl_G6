@@ -1,6 +1,8 @@
 import serial
 import time
 import numpy as np
+import matplotlib
+matplotlib.use('TkAgg') # Define o "motor" do gráfico para um que suporte blitting
 import matplotlib.pyplot as plt
 from collections import deque
 import argparse
@@ -24,43 +26,37 @@ args = parser.parse_args()
 # --- Configurações ---
 BAUD = args.baud
 PORT = args.port
-FS = 100  # Taxa de amostragem esperada (Hz)
-N_CHANNELS = 14 # Número de canais que o Arduino está enviando
-WINDOW_SIZE = FS * 5 # Janela de 5 segundos
+FS = 100
+N_CHANNELS = 14
+WINDOW_SIZE = FS * 5 # Janela de 5 segundos (500 amostras)
 
 # --- Buffers de Dados (um deque para cada canal) ---
-# Vamos armazenar todos os 14 canais, mesmo que só plotemos 4
 data_buffers = [deque([0.0] * WINDOW_SIZE, maxlen=WINDOW_SIZE) for _ in range(N_CHANNELS)]
 
-# --- Configuração do Gráfico (4 subplots) ---
-plt.ion()
-fig, ax = plt.subplots(4, 1, figsize=(10, 8), constrained_layout=True)
+# --- Configuração do Gráfico (2 subplots) ---
+fig, ax = plt.subplots(2, 1, figsize=(10, 7), constrained_layout=True)
 fig.suptitle(f"Debug dos Sensores da Perna (Porta: {PORT})", fontsize=16)
 x_axis = np.arange(0, WINDOW_SIZE)
 
-# Nomes dos gráficos (vamos plotar 4 dos 14)
-plot_indices = [0, 1, 2, 8] # [EMG, ECG, IMU1_Ax, IMU2_Ax]
-plot_titles = [
-    'Canal 0: EMG (Quadríceps)',
-    'Canal 1: ECG (Isquiotibial)',
-    'Canal 2: IMU 1 - Acel. X (Quadril)',
-    'Canal 8: IMU 2 - Acel. X (Coxa)'
-]
+# --- Gráfico 1: Músculos (EMG/ECG) ---
+# O 'animated=True' é essencial para o blitting
+ln_emg, = ax[0].plot(x_axis, data_buffers[0], lw=1, color='blue', label='EMG (Quad)', animated=True)
+ln_ecg, = ax[0].plot(x_axis, data_buffers[1], lw=1, color='red', label='ECG (Isquio)', animated=True)
+ax[0].set_title('Músculos Agonista vs. Antagonista')
+ax[0].set_ylim(0, 4096) # Começa com o limite total do ADC
+ax[0].legend(loc='upper left')
 
-# Criar as linhas do gráfico
-lines = []
-for i in range(4):
-    idx = plot_indices[i]
-    ln, = ax[i].plot(x_axis, data_buffers[idx], lw=1)
-    ax[i].set_title(plot_titles[i])
-    ax[i].set_ylim(0, 4096) # Limite padrão para analógicos
-    lines.append(ln)
+# --- Gráfico 2: IMUs (Acelerômetro X) ---
+ln_imu1, = ax[1].plot(x_axis, data_buffers[2], lw=1, color='green', label='IMU 1 - Ax (Quadril)', animated=True)
+ln_imu2, = ax[1].plot(x_axis, data_buffers[8], lw=1, color='purple', label='IMU 2 - Ax (Coxa)', animated=True)
+ax[1].set_title('IMUs (Aceleração em X)')
+ax[1].set_ylim(-20, 20) # Limite fixo para aceleração (m/s^2)
+ax[1].legend(loc='upper left')
 
-# Ajustar os limites Y dos IMUs
-ax[2].set_ylim(-20, 20) # Acelerômetro (em m/s^2)
-ax[3].set_ylim(-20, 20) # Acelerômetro (em m/s^2)
-
-t_last_draw = time.time()
+# --- Setup de Blitting ---
+plt.show(block=False)
+fig.canvas.draw()
+backgrounds = [fig.canvas.copy_from_bbox(ax[i].bbox) for i in range(2)]
 
 # --- Conexão Serial ---
 try:
@@ -70,64 +66,77 @@ except serial.SerialException as e:
     print(f"Erro ao abrir a porta serial {PORT}: {e}")
     exit()
 
-time.sleep(1.0) # Espera o ESP32 resetar
+time.sleep(1.0)
 ser.flushInput()
 
-# --- Loop Principal de Leitura e Plot ---
+# --- Loop Principal de Leitura e Plot (RÁPIDO) ---
 try:
     while True:
+        # 1. Ler e Processar Dados (O mais rápido possível)
         line = ser.readline()
         if not line:
             continue
         
         try:
-            # Decodifica a linha (bytes -> string) e remove espaços em branco
             line_str = line.decode('utf-8').strip()
-            
-            # Divide a string CSV em uma lista de valores
             values_str = line_str.split(',')
-            
-            # Verifica se recebemos o número correto de canais
             if len(values_str) != N_CHANNELS:
-                print(f"Linha mal formatada (esperava {N_CHANNELS}, recebeu {len(values_str)}): {line_str}")
                 continue
-
-            # Converte todos os valores de string para float
             values_float = [float(v) for v in values_str]
-
-            # Adiciona cada valor ao seu respectivo buffer
             for i in range(N_CHANNELS):
                 data_buffers[i].append(values_float[i])
         
-        except (UnicodeDecodeError, ValueError) as e:
-            print(f"Erro no parsing: {e} | Linha: {line_str}")
+        except (UnicodeDecodeError, ValueError):
             continue
         
-        # --- Atualização do Gráfico (a ~30Hz para economizar CPU) ---
-        if time.time() - t_last_draw > (1/30):
-            t_last_draw = time.time()
-            
-            # Atualiza os dados das 4 linhas que estamos plotando
-            for i in range(4):
-                idx = plot_indices[i]
-                lines[i].set_ydata(data_buffers[idx])
-            
-            # Reajusta os limites Y dos analógicos (EMG/ECG)
-            min_emg = np.min(data_buffers[0])
-            max_emg = np.max(data_buffers[0])
-            ax[0].set_ylim(min_emg * 0.9, max_emg * 1.1)
-            
-            min_ecg = np.min(data_buffers[1])
-            max_ecg = np.max(data_buffers[1])
-            ax[1].set_ylim(min_ecg * 0.9, max_ecg * 1.1)
+        # 2. Redesenhar o Gráfico (Técnica de Blitting)
+        
+        # Restaura os fundos (tira a "foto" limpa)
+        fig.canvas.restore_region(backgrounds[0])
+        fig.canvas.restore_region(backgrounds[1])
 
-            # Redesenha o gráfico
-            plt.pause(0.001)
+        # Ajusta o Eixo Y do Gráfico 1 (Músculos) dinamicamente
+        min_val = min(np.min(data_buffers[0]), np.min(data_buffers[1]))
+        max_val = max(np.max(data_buffers[0]), np.max(data_buffers[1]))
+        ax[0].set_ylim(min_val - (max_val*0.1), max_val + (max_val*0.1)) # Adiciona 10% de margem
+
+        # Seta os novos dados das linhas
+        ln_emg.set_ydata(data_buffers[0])
+        ln_ecg.set_ydata(data_buffers[1])
+        ln_imu1.set_ydata(data_buffers[2])
+        ln_imu2.set_ydata(data_buffers[8])
+
+        # Desenha apenas as linhas (a parte rápida)
+        ax[0].draw_artist(ln_emg)
+        ax[0].draw_artist(ln_ecg)
+        ax[1].draw_artist(ln_imu1)
+        ax[1].draw_artist(ln_imu2)
+
+        # "Cola" as linhas desenhadas no fundo
+        fig.canvas.blit(ax[0].bbox)
+        fig.canvas.blit(ax[1].bbox)
+        
+        fig.canvas.flush_events()
 
 except KeyboardInterrupt:
     print("\nFinalizado pelo usuário.")
 finally:
     ser.close()
     plt.ioff()
-    plt.show() # Mostra o gráfico final estático
     print("Porta serial fechada.")
+```eof
+
+### O que fazer agora:
+
+1.  **Verifique a biblioteca:** O `matplotlib.use('TkAgg')` pode precisar da biblioteca `tkinter`. Se você tiver um erro sobre "TkAgg", rode no seu terminal `(venv)`:
+    ```bash
+    pip install tk
+    ```
+    (Na maioria das vezes, ele já vem com o Python, mas é bom saber).
+
+2.  **Rode o script:**
+    ```bash
+    python software/data_capture/serial_plotter.py --port COM3
+    ```
+
+Você deve ver uma janela com 2 gráficos. O gráfico de cima terá duas linhas (azul e vermelha) e o de baixo terá duas linhas (verde e roxa). E o mais importante: eles devem estar **fluidos e sem lag**.

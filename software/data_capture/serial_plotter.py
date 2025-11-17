@@ -124,19 +124,5 @@ finally:
     ser.close()
     plt.ioff()
     print("Porta serial fechada.")
-```eof
 
-### O que fazer agora:
-
-1.  **Verifique a biblioteca:** O `matplotlib.use('TkAgg')` pode precisar da biblioteca `tkinter`. Se você tiver um erro sobre "TkAgg", rode no seu terminal `(venv)`:
-    ```bash
-    pip install tk
-    ```
-    (Na maioria das vezes, ele já vem com o Python, mas é bom saber).
-
-2.  **Rode o script:**
-    ```bash
-    python software/data_capture/serial_plotter.py --port COM3
-    ```
-
-Você deve ver uma janela com 2 gráficos. O gráfico de cima terá duas linhas (azul e vermelha) e o de baixo terá duas linhas (verde e roxa). E o mais importante: eles devem estar **fluidos e sem lag**.
+# APAGUE A LINHA ABAIXO ANTES DE SALVAR

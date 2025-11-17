@@ -1,66 +1,31 @@
 import serial
 import time
 import numpy as np
-import matplotlib
-matplotlib.use('TkAgg') # Define o "motor" do gráfico para um que suporte blitting
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 from collections import deque
 import argparse
 
 # --- Argumentos de Linha de Comando ---
-parser = argparse.ArgumentParser(description='Plota dados seriais do ESP32 (EMG, ECG, 2x IMU)')
-parser.add_argument(
-    '--port', 
-    type=str, 
-    required=True, 
-    help='Porta serial (ex: COM3 no Windows, /dev/ttyUSB0 no Linux)'
-)
-parser.add_argument(
-    '--baud', 
-    type=int, 
-    default=115200, 
-    help='Baud rate (padrão: 115200)'
-)
+parser = argparse.ArgumentParser(description='Plota dados seriais do ESP32 (EMG, ECG, Ângulo)')
+parser.add_argument('--port', type=str, required=True, help='Porta serial (ex: COM3)')
+parser.add_argument('--baud', type=int, default=115200, help='Baud rate')
 args = parser.parse_args()
 
 # --- Configurações ---
-BAUD = args.baud
 PORT = args.port
+BAUD = args.baud
 FS = 100
-N_CHANNELS = 14
 WINDOW_SIZE = FS * 5 # Janela de 5 segundos (500 amostras)
 
-# --- Buffers de Dados (um deque para cada canal) ---
-data_buffers = [deque([0.0] * WINDOW_SIZE, maxlen=WINDOW_SIZE) for _ in range(N_CHANNELS)]
-
-# --- Configuração do Gráfico (2 subplots) ---
-fig, ax = plt.subplots(2, 1, figsize=(10, 7), constrained_layout=True)
-fig.suptitle(f"Debug dos Sensores da Perna (Porta: {PORT})", fontsize=16)
-x_axis = np.arange(0, WINDOW_SIZE)
-
-# --- Gráfico 1: Músculos (EMG/ECG) ---
-# O 'animated=True' é essencial para o blitting
-ln_emg, = ax[0].plot(x_axis, data_buffers[0], lw=1, color='blue', label='EMG (Quad)', animated=True)
-ln_ecg, = ax[0].plot(x_axis, data_buffers[1], lw=1, color='red', label='ECG (Isquio)', animated=True)
-ax[0].set_title('Músculos Agonista vs. Antagonista')
-ax[0].set_ylim(0, 4096) # Começa com o limite total do ADC
-ax[0].legend(loc='upper left')
-
-# --- Gráfico 2: IMUs (Acelerômetro X) ---
-ln_imu1, = ax[1].plot(x_axis, data_buffers[2], lw=1, color='green', label='IMU 1 - Ax (Quadril)', animated=True)
-ln_imu2, = ax[1].plot(x_axis, data_buffers[8], lw=1, color='purple', label='IMU 2 - Ax (Coxa)', animated=True)
-ax[1].set_title('IMUs (Aceleração em X)')
-ax[1].set_ylim(-20, 20) # Limite fixo para aceleração (m/s^2)
-ax[1].legend(loc='upper left')
-
-# --- Setup de Blitting ---
-plt.show(block=False)
-fig.canvas.draw()
-backgrounds = [fig.canvas.copy_from_bbox(ax[i].bbox) for i in range(2)]
+# --- Buffers de Dados (Agora só 3 canais) ---
+emg_data = deque([0.0] * WINDOW_SIZE, maxlen=WINDOW_SIZE)
+ecg_data = deque([0.0] * WINDOW_SIZE, maxlen=WINDOW_SIZE)
+angle_data = deque([0.0] * WINDOW_SIZE, maxlen=WINDOW_SIZE)
 
 # --- Conexão Serial ---
 try:
-    ser = serial.Serial(PORT, BAUD, timeout=0.1)
+    ser = serial.Serial(PORT, BAUD, timeout=0.01) # Timeout baixo (10ms)
     print(f"Conectado a {PORT} em {BAUD} baud.")
 except serial.SerialException as e:
     print(f"Erro ao abrir a porta serial {PORT}: {e}")
@@ -69,60 +34,83 @@ except serial.SerialException as e:
 time.sleep(1.0)
 ser.flushInput()
 
-# --- Loop Principal de Leitura e Plot (RÁPIDO) ---
-try:
-    while True:
-        # 1. Ler e Processar Dados (O mais rápido possível)
-        line = ser.readline()
-        if not line:
-            continue
-        
+# --- Configuração do Gráfico (2 subplots) ---
+fig, ax = plt.subplots(2, 1, figsize=(10, 7), constrained_layout=True)
+fig.suptitle(f"Debug dos Sensores da Perna (Porta: {PORT})", fontsize=16)
+x_axis = np.arange(0, WINDOW_SIZE)
+
+# --- Gráfico 1: Músculos (EMG/ECG) ---
+# Começamos com dados vazios
+ln_emg, = ax[0].plot(x_axis, [0]*WINDOW_SIZE, lw=1, color='blue', label='EMG (Quad)')
+ln_ecg, = ax[0].plot(x_axis, [0]*WINDOW_SIZE, lw=1, color='red', label='ECG (Isquio)')
+ax[0].set_title('Músculos Agonista vs. Antagonista')
+ax[0].set_ylim(0, 4096)
+ax[0].legend(loc='upper left')
+
+# --- Gráfico 2: Ângulo Relativo ---
+ln_angle, = ax[1].plot(x_axis, [0]*WINDOW_SIZE, lw=1, color='green', label='Ângulo Relativo (IMU1 - IMU2)')
+ax[1].set_title('Ângulo Relativo (Quadril vs. Coxa)')
+ax[1].set_ylim(-90, 90) # Limite fixo para ângulo em graus
+ax[1].legend(loc='upper left')
+ax[1].grid(True)
+
+# --- Função de Atualização (O Coração da Animação) ---
+def update_plot(frame):
+    
+    # Loop para limpar o buffer serial
+    # Isso garante que estamos vendo o dado MAIS RECENTE, matando o lag
+    while ser.in_waiting > 0:
         try:
-            line_str = line.decode('utf-8').strip()
-            values_str = line_str.split(',')
-            if len(values_str) != N_CHANNELS:
+            line = ser.readline()
+            if not line:
                 continue
-            values_float = [float(v) for v in values_str]
-            for i in range(N_CHANNELS):
-                data_buffers[i].append(values_float[i])
-        
-        except (UnicodeDecodeError, ValueError):
+            
+            line_str = line.decode('utf-8').strip()
+            
+            # Formato esperado: "E:400,C:300,A:12.34"
+            parts = line_str.split(',')
+            if len(parts) != 3:
+                continue # Ignora linha mal formatada
+
+            val_emg = int(parts[0].split(':')[1])
+            val_ecg = int(parts[1].split(':')[1])
+            val_angle = float(parts[2].split(':')[1])
+
+            # Adiciona os novos dados nos buffers
+            emg_data.append(val_emg)
+            ecg_data.append(val_ecg)
+            angle_data.append(val_angle)
+
+        except (UnicodeDecodeError, ValueError, IndexError):
+            # Ignora erros de parsing (ex: "--- Firmware ---")
             continue
-        
-        # 2. Redesenhar o Gráfico (Técnica de Blitting)
-        
-        # Restaura os fundos (tira a "foto" limpa)
-        fig.canvas.restore_region(backgrounds[0])
-        fig.canvas.restore_region(backgrounds[1])
+            
+    # Atualiza os dados das linhas do gráfico
+    ln_emg.set_ydata(emg_data)
+    ln_ecg.set_ydata(ecg_data)
+    ln_angle.set_ydata(angle_data)
 
-        # Ajusta o Eixo Y do Gráfico 1 (Músculos) dinamicamente
-        min_val = min(np.min(data_buffers[0]), np.min(data_buffers[1]))
-        max_val = max(np.max(data_buffers[0]), np.max(data_buffers[1]))
-        ax[0].set_ylim(min_val - (max_val*0.1), max_val + (max_val*0.1)) # Adiciona 10% de margem
+    # Ajusta o Eixo Y do Gráfico 1 (Músculos) dinamicamente
+    min_val = min(np.min(emg_data), np.min(ecg_data))
+    max_val = max(np.max(emg_data), np.max(ecg_data))
+    ax[0].set_ylim(min_val * 0.9, max_val * 1.1)
+    
+    # O Eixo Y do Ângulo é fixo (-90 a 90)
+    
+    return ln_emg, ln_ecg, ln_angle
 
-        # Seta os novos dados das linhas
-        ln_emg.set_ydata(data_buffers[0])
-        ln_ecg.set_ydata(data_buffers[1])
-        ln_imu1.set_ydata(data_buffers[2])
-        ln_imu2.set_ydata(data_buffers[8])
+# --- Inicia a Animação ---
+# interval=10 tenta rodar a 100fps, mas será limitado pela velocidade da serial
+# blit=True usa a técnica de blitting (rápido) de forma correta
+ani = animation.FuncAnimation(fig, update_plot, 
+                              interval=10, 
+                              blit=True, 
+                              cache_frame_data=False)
 
-        # Desenha apenas as linhas (a parte rápida)
-        ax[0].draw_artist(ln_emg)
-        ax[0].draw_artist(ln_ecg)
-        ax[1].draw_artist(ln_imu1)
-        ax[1].draw_artist(ln_imu2)
-
-        # "Cola" as linhas desenhadas no fundo
-        fig.canvas.blit(ax[0].bbox)
-        fig.canvas.blit(ax[1].bbox)
-        
-        fig.canvas.flush_events()
-
+try:
+    plt.show()
 except KeyboardInterrupt:
     print("\nFinalizado pelo usuário.")
 finally:
     ser.close()
-    plt.ioff()
     print("Porta serial fechada.")
-
-# APAGUE A LINHA ABAIXO ANTES DE SALVAR

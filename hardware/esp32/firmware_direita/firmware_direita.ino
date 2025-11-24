@@ -83,5 +83,5 @@ void loop() {
     udp.print(buffer_dados); 
     udp.endPacket();
     
-    delay(5); // ~200Hz
+    delay(10); // ~100Hz
 }

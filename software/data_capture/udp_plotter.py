@@ -112,16 +112,20 @@ def update(frame):
     while True:
         try:
             data, addr = sock.recvfrom(1024) 
-            # print(f"DEBUG: Recebido de {addr}: {data}") # Descomente para debug extremo
-            parts = data.decode('utf-8').strip().split(',')
+            raw_msg = data.decode('utf-8').strip()
+            print(f"DEBUG: Recebido de {addr}: {raw_msg}") 
+            parts = raw_msg.split(',')
             if len(parts) == 4:
                 dev_id, angle, emg, ecg = parts[0], float(parts[1]), int(parts[2]), int(parts[3])
                 if dev_id in data_store:
+                    # print(f"DEBUG: Parsed -> ID={dev_id} Ang={angle} EMG={emg} ECG={ecg}")
                     data_store[dev_id]["angle"].append(angle)
                     data_store[dev_id]["emg"].append(emg)
                     data_store[dev_id]["ecg"].append(ecg)
                     data_store[dev_id]["last_seen"] = time.time()
                     data_store[dev_id]["count"] += 1
+                else:
+                    print(f"DEBUG: ID desconhecido recebido: {dev_id}")
                     
                     if csv_writer:
                         t = round(time.time() - start_time, 4)
@@ -174,6 +178,6 @@ def update(frame):
 
     return list(lines.values()) + [txt_fps]
 
-ani = animation.FuncAnimation(fig, update, interval=30, blit=True, cache_frame_data=False)
+ani = animation.FuncAnimation(fig, update, interval=30, blit=False, cache_frame_data=False)
 plt.show()
 if csv_file: csv_file.close()

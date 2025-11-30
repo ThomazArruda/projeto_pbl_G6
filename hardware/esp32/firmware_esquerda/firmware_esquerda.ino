@@ -13,7 +13,7 @@
 const char* ssid = "iPhone de Thomaz";     
 const char* password = "thomazqw"; 
 // !!! COLOQUE O IP DO SEU COMPUTADOR AQUI !!!
-const char* host_ip = "192.168.15.5";  
+const char* host_ip = "172.20.10.7";  
 const int udp_port = 4210; 
 
 const char* ID_DISPOSITIVO = "ESQ"; 

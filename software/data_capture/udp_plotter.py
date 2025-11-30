@@ -111,7 +111,8 @@ def update(frame):
     # 1. Ler Rede
     while True:
         try:
-            data, _ = sock.recvfrom(1024) 
+            data, addr = sock.recvfrom(1024) 
+            # print(f"DEBUG: Recebido de {addr}: {data}") # Descomente para debug extremo
             parts = data.decode('utf-8').strip().split(',')
             if len(parts) == 4:
                 dev_id, angle, emg, ecg = parts[0], float(parts[1]), int(parts[2]), int(parts[3])

@@ -1,105 +1,122 @@
-# Projeto PBL – Plataforma de Reabilitação Pós-AVC
+# NeuroPasso 🧠🦵
 
-Repositório base para o protótipo que integra captura de sinais EMG/ECG e IMUs com uma
-interface clínica em Streamlit. O objetivo é apoiar equipes médicas na avaliação
-contínua de pacientes pós-AVC, desde a coleta no hardware até o painel de
-acompanhamento.
+**NeuroPasso** é uma aplicação web completa para monitoramento e reabilitação de pacientes com deficiências motoras. O sistema visualiza dados em tempo real de sensores (Ângulo, EMG, ECG) conectados a microcontroladores ESP32, permitindo que fisioterapeutas acompanhem a evolução do tratamento e utilizem biofeedback visual.
 
-## Estrutura do Repositório
+---
 
-```
-projeto_pbl/
-├── hardware/
-│   └── esp32/
-│       ├── esp32_leg_sensors.ino      # Leitura básica de EMG/ECG/IMU
-│       ├── firmware_direita/
-│       │   └── firmware_direita.ino    # Código perna direita
-│       └── firmware_esquerdo/
-│           └── firmware_esquerdo.ino   # Código perna esquerda
-├── software/
-│   ├── __init__.py
-│   ├── data_capture/
-│   │   └── udp_plotter.py          # Debug de sinais via wifi
-│   └── dashboard/
-│       ├── __init__.py
-│       ├── app.py                     # Aplicação Streamlit
-│       └── database.py                # Camada de persistência (SQLite)
-├── data/
-│   └── README.md                      # Orientações sobre `clinic.db` e exports
-├── requirements.txt                   # Dependências do painel
-└── README.md
-```
+## 📋 Pré-requisitos
 
-- **hardware/** contém todos os firmwares para ESP32. Conectamos ambas as esps no mesmo hot spot
-  que o computador.
-- **software/** traz os componentes em Python. Use o `serial_plotter.py` para
-  inspecionar o hardware antes do painel, e o diretório `dashboard` para a
-  aplicação Streamlit com banco SQLite.
-- **data/** guarda o banco `clinic.db` (ignorado pelo Git) e exportações geradas
-  pelo app. Consulte `data/README.md` para os detalhes de uso e políticas de
-  versionamento.
+Para rodar este projeto do zero, você precisará instalar os seguintes programas no seu computador:
 
-## Pré-requisitos
+1.  **Node.js** (Versão 18 ou superior): Necessário para o Frontend (React).
+    *   [Baixar Node.js](https://nodejs.org/)
+2.  **Python** (Versão 3.10 ou superior): Necessário para o Backend (FastAPI).
+    *   [Baixar Python](https://www.python.org/downloads/)
+    *   *Nota: Durante a instalação, marque a opção "Add Python to PATH".*
+3.  **Arduino IDE**: Para carregar os códigos nos microcontroladores ESP32.
+    *   [Baixar Arduino IDE](https://www.arduino.cc/en/software)
+4.  **Git** (Opcional, mas recomendado): Para baixar este repositório.
+    *   [Baixar Git](https://git-scm.com/)
 
-- Python 3.10 ou superior.
-- Pip ou outro gerenciador de pacotes compatível.
-- (Opcional) Arduino IDE para gravar o firmware na ESP32.
+---
 
-Instale as dependências Python com:
+## 🛠️ Configuração do Hardware (ESP32)
 
-```bash
-pip install -r requirements.txt
-```
+O sistema utiliza dois módulos ESP32, um para cada perna (Direita e Esquerda).
 
-> **Nota:** O arquivo `requirements.txt` inclui `streamlit`, `pandas`, `plotly`,
-> `numpy`, `pyserial` e `scipy`.
+1.  **Abra o Arduino IDE**.
+2.  Instale as bibliotecas necessárias (se houver) e o suporte à placa ESP32 no gerenciador de placas.
+3.  **Configurar IP do Servidor:**
+    *   Descubra o endereço IP do seu computador (no Windows, abra o terminal e digite `ipconfig`. Procure por "Endereço IPv4", ex: `192.168.1.15`).
+    *   Abra os arquivos de firmware localizados na pasta `hardware/`:
+        *   `hardware/esp32/firmware_direita/firmware_direita.ino`
+        *   `hardware/esp32/firmware_esquerda/firmware_esquerda.ino`
+    *   No código, procure pela linha que define o `host` ou `server IP` e altere para o IP do seu computador.
+    *   Atualize também o `SSID` e `PASSWORD` com o nome e senha da sua rede Wi-Fi.
+4.  **Carregar o Código:**
+    *   Conecte o ESP32 da perna **Direita** via USB, selecione a porta correta no Arduino IDE e clique em "Carregar" (Seta para direita).
+    *   Repita o processo para o ESP32 da perna **Esquerda** usando o arquivo correspondente.
 
-## Firmware ESP32
+---
 
-1. Abra o arquivo desejado em `hardware/esp32/` na Arduino IDE.
-2. Ajuste os pinos dos sensores conforme seu circuito.
-3. Faça o upload para a placa ESP32 com a taxa de transmissão em 115200 baud.
+## 🚀 Instalação e Execução do Software
 
-As leituras são enviadas no formato `ECG: <valor>, EMG: <valor>` para a porta
-serial (firmwares mestre/escravo seguem o mesmo padrão, apenas dividindo os
-sensores por placa).
+Você precisará de dois terminais abertos: um para o Backend (Servidor) e outro para o Frontend (Site).
 
-## Captura e Visualização dos Sinais (Debug)
+### Passo 1: Configurar o Backend (Servidor)
 
-O script `software/data_capture/serial_plotter.py` é uma ferramenta de debug
-opcional. Ele lê o monitor serial e plota os sinais brutos em tempo real.
+1.  Abra um terminal (PowerShell ou CMD).
+2.  Navegue até a pasta `backend` do projeto:
+    ```bash
+    cd caminho/para/projeto_pbl/backend
+    ```
+3.  Crie um ambiente virtual (para isolar as bibliotecas):
+    ```bash
+    python -m venv venv
+    ```
+4.  Ative o ambiente virtual:
+    *   **Windows:** `.\venv\Scripts\activate`
+    *   **Mac/Linux:** `source venv/bin/activate`
+5.  Instale as dependências:
+    ```bash
+    pip install -r requirements.txt
+    ```
+6.  Inicie o servidor:
+    ```bash
+    uvicorn main:app --reload --host 0.0.0.0 --port 8000
+    ```
+    *   *Se aparecer uma mensagem de firewall, permita o acesso.*
+    *   O servidor estará rodando e pronto para receber dados dos ESP32 via UDP e conexões do site.
 
-```bash
-python software/data_capture/serial_plotter.py --port COM3
-```
+### Passo 2: Configurar o Frontend (Site)
 
-## Painel Clínico Streamlit
+1.  Abra um **novo** terminal.
+2.  Navegue até a pasta `frontend` do projeto:
+    ```bash
+    cd caminho/para/projeto_pbl/frontend
+    ```
+3.  Instale as dependências do projeto:
+    ```bash
+    npm install
+    ```
+4.  Inicie o site:
+    ```bash
+    npm run dev
+    ```
+5.  O terminal mostrará um link (geralmente `http://localhost:5173`). Segure `Ctrl` e clique no link para abrir no navegador.
 
-O painel principal é o `software/dashboard/app.py`. Ele simula o acompanhamento de
-sessões, guarda o histórico de cada paciente em um banco SQLite (`data/clinic.db`)
-e exibe métricas de desempenho.
+---
 
-```bash
-streamlit run software/dashboard/app.py
-```
+## 📖 Como Usar o NeuroPasso
 
-Ao abrir o painel, cadastre novos pacientes pelo formulário lateral. As sessões
-simuladas coletadas são associadas ao paciente selecionado e salvas
-automaticamente no banco de dados via `database.py`.
+1.  **Tela Inicial (Home):**
+    *   Você verá a lista de pacientes cadastrados.
+    *   Para adicionar um novo, digite o nome no campo "Nome do Paciente" e clique em **"Cadastrar Novo Paciente"**.
+    *   Clique no cartão de um paciente para ver seus detalhes.
 
-## Estrutura do Banco de Dados
+2.  **Detalhes do Paciente:**
+    *   Aqui você vê o histórico de evolução do paciente.
+    *   **Gráfico de Amplitude:** Mostra o ângulo máximo alcançado em cada sessão.
+        *   🟢 Verde: Perna Controle (Direita).
+        *   🔴 Vermelho (Tracejado): Perna em Tratamento (Esquerda).
+    *   **Gráfico de Ativação:** Mostra a média de ativação muscular (EMG).
+    *   Clique em **"Iniciar Nova Sessão"** para ir ao Dashboard em tempo real.
 
-O arquivo `data/clinic.db` contém duas tabelas:
+3.  **Dashboard (Sessão em Tempo Real):**
+    *   Ligue os ESP32. Se configurados corretamente, os indicadores "Wifi" ficarão verdes e os gráficos começarão a se mover.
+    *   Acompanhe os gráficos de Ângulo, EMG e ECG em tempo real.
+    *   **Biofeedback:** Os números mudam de cor (Verde/Amarelo/Vermelho) dependendo da intensidade.
+    *   Quando terminar o exercício, clique em **"Parar Sessão"**.
+    *   Clique em **"Salvar"** para registrar os dados no histórico do paciente ou **"Reiniciar"** para descartar e começar de novo.
 
-- `patients(id, name)` – Lista dos pacientes cadastrados.
-- `sessions(id, patient_id, collected_at, payload_json)` – Histórico das sessões,
-  com os dados da sessão (time, le_quad, etc.) armazenados em JSON.
+---
 
-Para inspecionar o banco fora do Streamlit, utilize qualquer ferramenta SQLite.
+## 📂 Estrutura do Projeto
 
-## Próximos Passos
+*   `backend/`: Código do servidor (Python/FastAPI) e Banco de Dados (`clinic.db`).
+*   `frontend/`: Código da interface visual (React/Vite).
+*   `hardware/`: Códigos para os microcontroladores ESP32.
 
-- [x] Garantir que o `app.py` salve e carregue sessões corretamente via `database.py`.
-- [ ] Integrar os sinais reais (leitura da serial e filtros) diretamente no `app.py`.
-- [ ] Adicionar sensores de IMU ao firmware e ao painel.
-- [ ] Documentar protocolos de avaliação clínica e métricas utilizadas.
+---
+
+**Desenvolvido para o Projeto PBL - Engenharia de Computação**

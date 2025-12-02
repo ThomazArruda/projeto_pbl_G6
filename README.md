@@ -111,11 +111,41 @@ Você precisará de dois terminais abertos: um para o Backend (Servidor) e outro
 
 ---
 
+### Passo 3: Análise de Dados (Relatório Científico) 📊
+
+Para gerar gráficos de alta resolução para relatórios, utilizamos um ambiente isolado com Jupyter Notebook.
+
+1.  Abra um terminal e navegue até a pasta `analysis`:
+    ```bash
+    cd caminho/para/projeto_pbl/analysis
+    ```
+2.  Crie e ative um ambiente virtual específico para análise:
+    ```bash
+    python -m venv venv
+    .\venv\Scripts\activate
+    ```
+3.  Instale as dependências de ciência de dados:
+    ```bash
+    pip install -r requirements.txt
+    ```
+4.  Abra o VS Code nesta pasta ou inicie o Jupyter:
+    *   Recomendado: Abra o arquivo `scientific_report.ipynb` no VS Code.
+    *   Certifique-se de selecionar o Kernel `analysis/venv`.
+
+**Funcionalidades do Notebook:**
+*   **Alta Resolução:** Plota 100% dos pontos coletados (sem arredondamentos de tempo).
+*   **Comparação Bilateral:** Suporta dados das duas pernas simultaneamente (Direita=Sólida, Esquerda=Tracejada).
+*   **Fusão de Sensores (Sensor Fusion):** Calcula a "Ativação Muscular Total" fazendo a média `(EMG + ECG) / 2`.
+*   **Filtro Butterworth:** Aplica filtros digitais para limpar o ruído do EMG e mostrar a envoltória de ativação muscular.
+
+---
+
 ## 📂 Estrutura do Projeto
 
 *   `backend/`: Código do servidor (Python/FastAPI) e Banco de Dados (`clinic.db`).
 *   `frontend/`: Código da interface visual (React/Vite).
 *   `hardware/`: Códigos para os microcontroladores ESP32.
+*   `analysis/`: Scripts e Notebooks para geração de gráficos científicos.
 
 ---
 

@@ -19,14 +19,44 @@ function PatientDetails() {
             const res = await fetch(`http://localhost:8000/patients/${id}/history`);
             const data = await res.json();
             // Format data for chart
-            const formattedData = data.map(session => ({
-                date: new Date(session.timestamp).toLocaleDateString(),
-                fullDate: new Date(session.timestamp).toLocaleString(),
-                max_angle_esq: session.max_angle_esq,
-                max_angle_dir: session.max_angle_dir,
-                avg_emg_esq: session.avg_emg_esq,
-                avg_emg_dir: session.avg_emg_dir
-            }));
+            const formattedData = data.map(session => {
+                let avgEmgEsq = session.avg_emg_esq;
+                let avgEmgDir = session.avg_emg_dir;
+                let avgEcgEsq = 0;
+                let avgEcgDir = 0;
+
+                // Try to parse raw data to get separate averages if available
+                if (session.raw_data_blob) {
+                    try {
+                        const rawData = JSON.parse(session.raw_data_blob);
+                        if (Array.isArray(rawData) && rawData.length > 0) {
+                            // Calculate averages from raw data
+                            const sumEmgEsq = rawData.reduce((acc, curr) => acc + (curr.ESQ_emg || 0), 0);
+                            const sumEmgDir = rawData.reduce((acc, curr) => acc + (curr.DIR_emg || 0), 0);
+                            const sumEcgEsq = rawData.reduce((acc, curr) => acc + (curr.ESQ_ecg || 0), 0);
+                            const sumEcgDir = rawData.reduce((acc, curr) => acc + (curr.DIR_ecg || 0), 0);
+
+                            avgEmgEsq = sumEmgEsq / rawData.length;
+                            avgEmgDir = sumEmgDir / rawData.length;
+                            avgEcgEsq = sumEcgEsq / rawData.length;
+                            avgEcgDir = sumEcgDir / rawData.length;
+                        }
+                    } catch (e) {
+                        console.error("Error parsing raw data blob:", e);
+                    }
+                }
+
+                return {
+                    date: new Date(session.timestamp).toLocaleDateString(),
+                    fullDate: new Date(session.timestamp).toLocaleString(),
+                    max_angle_esq: session.max_angle_esq,
+                    max_angle_dir: session.max_angle_dir,
+                    avg_emg_esq: avgEmgEsq,
+                    avg_emg_dir: avgEmgDir,
+                    avg_ecg_esq: avgEcgEsq,
+                    avg_ecg_dir: avgEcgDir
+                };
+            });
             setHistory(formattedData);
         } catch (err) {
             console.error("Error fetching history:", err);
@@ -94,9 +124,9 @@ function PatientDetails() {
                             )}
                         </div>
 
-                        {/* Activation Chart */}
-                        <div className="h-80 bg-background/50 rounded-xl border border-slate-700/50 p-4">
-                            <h4 className="text-lg font-medium mb-4 text-slate-400 text-center">Ativação Muscular Média (EMG + ECG)</h4>
+                        {/* EMG Chart - Reto Femoral */}
+                        <div className="h-80 bg-background/50 rounded-xl border border-slate-700/50 p-4 mb-8">
+                            <h4 className="text-lg font-medium mb-4 text-slate-400 text-center">Ativação Muscular no Reto Femoral (EMG)</h4>
                             {history.length > 0 ? (
                                 <ResponsiveContainer width="100%" height="100%">
                                     <LineChart data={history}>
@@ -110,6 +140,31 @@ function PatientDetails() {
                                         <Legend verticalAlign="top" height={36} />
                                         <Line name="Perna Esquerda (Parética)" type="monotone" dataKey="avg_emg_esq" stroke="#ef4444" strokeWidth={3} strokeDasharray="5 5" dot={{ r: 4 }} activeDot={{ r: 6 }} />
                                         <Line name="Perna Direita (Controle)" type="monotone" dataKey="avg_emg_dir" stroke="#22c55e" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                                    </LineChart>
+                                </ResponsiveContainer>
+                            ) : (
+                                <div className="h-full flex items-center justify-center text-slate-500">
+                                    Nenhuma sessão registrada.
+                                </div>
+                            )}
+                        </div>
+
+                        {/* ECG Chart - Isquiotibial */}
+                        <div className="h-80 bg-background/50 rounded-xl border border-slate-700/50 p-4">
+                            <h4 className="text-lg font-medium mb-4 text-slate-400 text-center">Ativação Muscular no Isquiotibial (ECG)</h4>
+                            {history.length > 0 ? (
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <LineChart data={history}>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                                        <XAxis dataKey="date" stroke="#94a3b8" />
+                                        <YAxis domain={[0, 4095]} stroke="#94a3b8" label={{ value: 'Ativação (0-4095)', angle: -90, position: 'insideLeft', fill: '#94a3b8' }} />
+                                        <Tooltip
+                                            contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155' }}
+                                            labelStyle={{ color: '#e2e8f0' }}
+                                        />
+                                        <Legend verticalAlign="top" height={36} />
+                                        <Line name="Perna Esquerda (Parética)" type="monotone" dataKey="avg_ecg_esq" stroke="#ef4444" strokeWidth={3} strokeDasharray="5 5" dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                                        <Line name="Perna Direita (Controle)" type="monotone" dataKey="avg_ecg_dir" stroke="#22c55e" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
                                     </LineChart>
                                 </ResponsiveContainer>
                             ) : (

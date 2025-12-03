@@ -22,6 +22,10 @@ function Dashboard() {
 
     const ws = useRef(null);
     const sessionDataRef = useRef([]);
+    const latestValuesRef = useRef({
+        ESQ: { angle: 0, emg: 0, ecg: 0 },
+        DIR: { angle: 0, emg: 0, ecg: 0 }
+    });
 
     useEffect(() => {
         connectWebSocket();
@@ -49,26 +53,53 @@ function Dashboard() {
 
             const message = JSON.parse(event.data);
             if (message.type === 'data') {
-                const { id, values, timestamp } = message;
+                const { id: rawId, values, timestamp } = message;
+                const deviceId = rawId.trim(); // Handle potential whitespace and avoid shadowing
+
+                // Calibration Offsets (Hardware Correction)
+                const LEFT_LEG_OFFSET = 26; // Fine tuning: 36 - 10 = 26 to raise the graph by 10 degrees
+
+                // Apply specific calibration per leg
+                let calibratedAngle = values.angle;
+
+                if (deviceId === 'ESQ') {
+                    // Invert direction: -(Raw + Offset)
+                    calibratedAngle = -(values.angle + LEFT_LEG_OFFSET);
+                } else if (deviceId === 'DIR') {
+                    // Right Leg: Original (Raw)
+                    calibratedAngle = values.angle;
+                }
+
+                // Clamp to 0 to prevent negative values (Hyperextension/Noise)
+                calibratedAngle = Math.max(0, calibratedAngle);
+
+                // Update Latest Values Ref (Merge State)
+                latestValuesRef.current[deviceId] = {
+                    ...values,
+                    angle: calibratedAngle
+                };
 
                 // Update Current Values (Instant)
                 setCurrentValues(prev => ({
                     ...prev,
-                    [id]: values
+                    [deviceId]: {
+                        ...values,
+                        angle: calibratedAngle
+                    }
                 }));
 
+                // Create Data Point using MERGED state from both legs
                 const newDataPoint = {
                     time: new Date().toLocaleTimeString(),
-                    [`${id}_angle`]: values.angle,
-                    [`${id}_emg`]: values.emg,
-                    [`${id}_ecg`]: values.ecg
+                    ESQ_angle: latestValuesRef.current.ESQ.angle,
+                    ESQ_emg: latestValuesRef.current.ESQ.emg,
+                    ESQ_ecg: latestValuesRef.current.ESQ.ecg,
+                    DIR_angle: latestValuesRef.current.DIR.angle,
+                    DIR_emg: latestValuesRef.current.DIR.emg,
+                    DIR_ecg: latestValuesRef.current.DIR.ecg
                 };
 
                 // Accumulate ALL data for saving (Full History)
-                // We need to merge with the last point if it has the same timestamp or just push
-                // For simplicity in this high-frequency stream, we push individual updates
-                // But to keep it cleaner, we might want to merge updates from different legs if they come close together.
-                // For now, simple push is safer to not lose data.
                 sessionDataRef.current.push(newDataPoint);
 
                 // Update Graph Data (Windowed History for UI)
@@ -89,6 +120,10 @@ function Dashboard() {
     const handleRestart = () => {
         setData([]);
         sessionDataRef.current = []; // Clear full history
+        latestValuesRef.current = { // Reset latest values
+            ESQ: { angle: 0, emg: 0, ecg: 0 },
+            DIR: { angle: 0, emg: 0, ecg: 0 }
+        };
         setIsSessionActive(true);
         setShowSaveOptions(false);
     };
@@ -262,47 +297,47 @@ function Dashboard() {
 
                 {/* Charts Area */}
                 <div className="lg:col-span-2 space-y-6">
-                    {/* Angle Chart - Lilac */}
+                    {/* Angle Chart - Lilac/Purple */}
                     <div className="bg-surface p-6 rounded-2xl shadow-lg border border-slate-700/50 h-[250px]">
-                        <h2 className="text-lg font-semibold mb-2 text-slate-300">Cinemática (Ângulo do Joelho)</h2>
+                        <h2 className="text-lg font-semibold mb-2 text-slate-300">Ângulo da Flexão de Quadril</h2>
                         <ResponsiveContainer width="100%" height="100%">
                             <LineChart data={data}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                                 <XAxis dataKey="time" hide />
-                                <YAxis domain={[0, 180]} stroke="#94a3b8" />
+                                <YAxis domain={[0, 180]} stroke="#94a3b8" allowDataOverflow={true} />
                                 <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155' }} />
                                 <Line type="monotone" dataKey="ESQ_angle" stroke="#a78bfa" strokeWidth={2} strokeDasharray="5 5" dot={false} isAnimationActive={false} />
-                                <Line type="monotone" dataKey="DIR_angle" stroke="#a78bfa" strokeWidth={2} dot={false} isAnimationActive={false} />
+                                <Line type="monotone" dataKey="DIR_angle" stroke="#7c3aed" strokeWidth={2} dot={false} isAnimationActive={false} />
                             </LineChart>
                         </ResponsiveContainer>
                     </div>
 
-                    {/* EMG Chart - Blue */}
+                    {/* EMG Chart - Blue/Dark Blue */}
                     <div className="bg-surface p-6 rounded-2xl shadow-lg border border-slate-700/50 h-[250px]">
-                        <h2 className="text-lg font-semibold mb-2 text-slate-300">Ativação Muscular (EMG)</h2>
+                        <h2 className="text-lg font-semibold mb-2 text-slate-300">Ativação Muscular no Reto Femoral (EMG)</h2>
                         <ResponsiveContainer width="100%" height="100%">
                             <LineChart data={data}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                                 <XAxis dataKey="time" hide />
                                 <YAxis domain={[0, 4095]} stroke="#94a3b8" />
                                 <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155' }} />
-                                <Line type="monotone" dataKey="ESQ_emg" stroke="#3b82f6" strokeWidth={2} strokeDasharray="5 5" dot={false} isAnimationActive={false} />
-                                <Line type="monotone" dataKey="DIR_emg" stroke="#3b82f6" strokeWidth={2} dot={false} isAnimationActive={false} />
+                                <Line type="monotone" dataKey="ESQ_emg" stroke="#60a5fa" strokeWidth={2} strokeDasharray="5 5" dot={false} isAnimationActive={false} />
+                                <Line type="monotone" dataKey="DIR_emg" stroke="#1e40af" strokeWidth={2} dot={false} isAnimationActive={false} />
                             </LineChart>
                         </ResponsiveContainer>
                     </div>
 
-                    {/* ECG Chart - Brown/Amber */}
+                    {/* ECG Chart - Amber/Orange */}
                     <div className="bg-surface p-6 rounded-2xl shadow-lg border border-slate-700/50 h-[250px]">
-                        <h2 className="text-lg font-semibold mb-2 text-slate-300">Eletrocardiograma (ECG)</h2>
+                        <h2 className="text-lg font-semibold mb-2 text-slate-300">Ativação Muscular no Isquiotibial (ECG)</h2>
                         <ResponsiveContainer width="100%" height="100%">
                             <LineChart data={data}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                                 <XAxis dataKey="time" hide />
                                 <YAxis domain={[0, 4095]} stroke="#94a3b8" />
                                 <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155' }} />
-                                <Line type="monotone" dataKey="ESQ_ecg" stroke="#d97706" strokeWidth={2} strokeDasharray="5 5" dot={false} isAnimationActive={false} />
-                                <Line type="monotone" dataKey="DIR_ecg" stroke="#d97706" strokeWidth={2} dot={false} isAnimationActive={false} />
+                                <Line type="monotone" dataKey="ESQ_ecg" stroke="#fbbf24" strokeWidth={2} strokeDasharray="5 5" dot={false} isAnimationActive={false} />
+                                <Line type="monotone" dataKey="DIR_ecg" stroke="#ea580c" strokeWidth={2} dot={false} isAnimationActive={false} />
                             </LineChart>
                         </ResponsiveContainer>
                     </div>

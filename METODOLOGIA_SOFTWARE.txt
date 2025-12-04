@@ -1,0 +1,1196 @@
+================================================================================
+                    METODOLOGIA DO SOFTWARE - PROJETO PBL
+        Sistema de Monitoramento e Análise Biomecânica para Reabilitação
+================================================================================
+
+ÍNDICE
+================================================================================
+
+1. VISÃO GERAL DO SISTEMA
+2. ARQUITETURA DE SOFTWARE
+3. COMPONENTES DE HARDWARE
+4. BACKEND - SERVIDOR E BANCO DE DADOS
+5. FRONTEND - INTERFACE COM USUÁRIO
+6. PIPELINE DE ANÁLISE ESTATÍSTICA
+7. FLUXO DE DADOS COMPLETO
+8. FERRAMENTAS E TECNOLOGIAS
+9. METODOLOGIA ESTATÍSTICA
+10. ROTEIRO DE EXECUÇÃO
+
+================================================================================
+1. VISÃO GERAL DO SISTEMA
+================================================================================
+
+OBJETIVO:
+O sistema foi desenvolvido para capturar, armazenar e analisar dados 
+biomecânicos de pacientes em reabilitação pós-AVC (Acidente Vascular Cerebral), 
+com foco especial em:
+- Movimento angular das pernas (ângulo de extensão do joelho)
+- Ativação muscular (EMG - Eletromiografia do quadríceps)
+- Resposta cardiovascular (ECG - Variabilidade do ritmo cardíaco)
+
+SCOPE DO PROJETO:
+✓ Captura de dados em tempo real via UDP a 4210
+✓ Armazenamento em banco de dados SQLite
+✓ Dashboard web para visualização
+✓ Análise estatística descritiva e inferencial
+✓ Testes de normalidade (Shapiro-Wilk)
+✓ Comparações bilaterais (t-test pareado)
+✓ Geração de relatórios em múltiplos formatos
+
+USUARIOS ALVO:
+- Fisioterapeutas: Monitoramento de progresso do paciente
+- Pesquisadores: Análise estatística de dados
+- Clínicos: Avaliação de efetividade de intervenções
+
+
+================================================================================
+2. ARQUITETURA DE SOFTWARE
+================================================================================
+
+ESTRUTURA DE DIRETÓRIOS:
+┌─────────────────────────────────────────────────────────────────┐
+│ projeto_pbl/                                                    │
+├─ hardware/                   [Firmware para captores]           │
+│  ├─ esp32/                                                      │
+│  │  ├─ firmware_direita/     [ESP32 perna direita, ID: DIR]    │
+│  │  ├─ firmware_esquerda/    [ESP32 perna esquerda, ID: ESQ]   │
+│  │  └─ esp32_leg_sensors/    [Configuração compartilhada]      │
+│  │                                                              │
+├─ backend/                    [Servidor e banco de dados]        │
+│  ├─ main.py                 [API FastAPI + WebSocket]          │
+│  ├─ database.py             [Configuração SQLAlchemy]          │
+│  ├─ models.py               [Modelos de dados ORM]             │
+│  ├─ clinic.db               [Banco SQLite com dados]           │
+│  └─ requirements.txt        [Dependências Python]              │
+│                                                                  │
+├─ frontend/                   [Interface web React]             │
+│  ├─ src/                                                        │
+│  │  ├─ App.jsx              [Componente principal]             │
+│  │  ├─ Home.jsx             [Página inicial]                   │
+│  │  ├─ Dashboard.jsx        [Visualização de dados]            │
+│  │  ├─ PatientDetails.jsx   [Detalhes do paciente]            │
+│  │  └─ index.css            [Estilos Tailwind CSS]            │
+│  ├─ vite.config.js          [Config Vite]                      │
+│  ├─ package.json            [Dependências Node.js]            │
+│  └─ tailwind.config.js      [Configuração Tailwind CSS]        │
+│                                                                  │
+└─ analysis/                   [Scripts de análise Python]        │
+   ├─ statistical_analysis.py  [Análise angular Shapiro-Wilk]    │
+   ├─ emg_analysis.py          [Análise EMG Shapiro-Wilk]        │
+   ├─ ecg_analysis.py          [Análise ECG Shapiro-Wilk]        │
+   ├─ ttest_pareado.py         [T-test pareado comparativo]      │
+   ├─ clinic.db                [Banco de dados (referência)]     │
+   └─ requirements.txt         [Dependências Python]             │
+
+PADRÃO DE ARQUITETURA:
+┌────────────┐         ┌─────────────┐         ┌──────────────┐
+│  HARDWARE  │  ─UDP→  │  BACKEND    │  ←SQL→  │   BANCO DE   │
+│  (ESP32)   │         │  (FastAPI)  │         │   DADOS      │
+│            │  ←─────→│  (Python)   │         │  (SQLite)    │
+└────────────┘         └─────────────┘         └──────────────┘
+                             ↓
+                        WebSocket
+                             ↓
+                       ┌─────────────┐
+                       │  FRONTEND   │
+                       │  (React.js) │
+                       └─────────────┘
+                             ↓
+                       ┌─────────────┐
+                       │  ANÁLISE    │
+                       │  (Python)   │
+                       └─────────────┘
+
+
+================================================================================
+3. COMPONENTES DE HARDWARE
+================================================================================
+
+DISPOSITIVOS UTILIZADOS:
+════════════════════════
+
+1. MICROCONTROLADORES:
+   - Tipo: 2x ESP32 (um para cada perna)
+   - Função: Captura de sensores e transmissão de dados
+   - Conectividade: WiFi
+   - Protocolo: UDP (User Datagram Protocol)
+   - Port: 4210
+
+2. SENSORES DE MOVIMENTO (MPU6050):
+   - Quantidade: 4 unidades (2 por perna)
+   - Localização ESQ: Quadril (I2C0) + Coxa (I2C0)
+   - Localização DIR: Quadril (I2C0) + Coxa (I2C1)
+   - Medição: Aceleração (±8g) + Giroscópio (±500°/s)
+   - Uso: Cálculo de ângulo de extensão do joelho via complementary filter
+
+3. SENSORES ANALÓGICOS:
+   - EMG (Eletromiografia):
+     * Pino: GPIO 34 (ADC channel)
+     * Medição: Ativação muscular em microvolts (µV)
+     * Músculo: Quadríceps
+   
+   - ECG (Eletrocardiografia):
+     * Pino: GPIO 35 (ADC channel)
+     * Medição: Sinais cardiovasculares em milivolts (mV)
+     * Músculo: Isquiotibial
+
+FIRMWARE - FUNCIONAMENTO:
+═════════════════════════
+
+ARQUIVO: firmware_direita.ino (Perna Direita - ID: "DIR")
+ARQUIVO: firmware_esquerda.ino (Perna Esquerda - ID: "ESQ")
+
+SEQUÊNCIA DE EXECUÇÃO:
+1. Inicialização WiFi (SSID: "iPhone de Thomaz", IP: 172.20.10.7:4210)
+2. Inicialização I2C dos sensores MPU6050
+3. Setup de ranges de sensores:
+   - Aceleração: ±8g (maior precisão)
+   - Giroscópio: ±500°/s
+
+4. LOOP PRINCIPAL (Taxa: ~100 Hz):
+   a) Leitura de aceleração e velocidade angular (MPU6050)
+   b) Cálculo de ângulo usando complementary filter:
+      
+      angle = 0.98 * (angle + gyro_rate * dt) + 0.02 * accel_angle
+      
+      Onde:
+      - 0.98 = peso do giroscópio (confiável a curto prazo)
+      - 0.02 = peso do acelerômetro (confiável a longo prazo)
+      - dt = delta de tempo desde última leitura
+   
+   c) Leitura de EMG (GPIO 34) - valor raw do ADC
+   d) Leitura de ECG (GPIO 35) - valor raw do ADC
+   
+   e) Montagem de pacote UDP:
+      Formato: "DIR|angle|emg|ecg\n"
+      Exemplo: "DIR|45.3|2850|3120\n"
+   
+   f) Envio via UDP para servidor (IP:4210)
+
+PROTOCOLO DE COMUNICAÇÃO:
+                         Estrutura do Pacote UDP
+      ┌─────┬────────┬────────┬────────┐
+      │ ID  │ ÂNGULO │  EMG   │  ECG   │
+      ├─────┼────────┼────────┼────────┤
+      │"DIR"│ 45.3°  │ 2850µV │ 3120mV │
+      │ ou  │ ou     │ ou     │ ou     │
+      │"ESQ"│ 42.1°  │ 1850µV │ 2920mV │
+      └─────┴────────┴────────┴────────┘
+      
+      Separador: "|" (pipe)
+      Terminador: "\n" (newline)
+      Taxa: ~100 pacotes/segundo
+
+
+================================================================================
+4. BACKEND - SERVIDOR E BANCO DE DADOS
+================================================================================
+
+TECNOLOGIA UTILIZADA:
+- Framework: FastAPI (Python 3.10+)
+- WSGI Server: Uvicorn
+- ORM: SQLAlchemy 2.0
+- Banco de Dados: SQLite
+- WebSocket: Para comunicação bidirecional
+
+ARQUIVO: backend/database.py
+════════════════════════════
+
+Função: Configuração da conexão com banco de dados
+
+CÓDIGO:
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.ext.declarative import declarative_base
+    
+    SQLALCHEMY_DATABASE_URL = "sqlite:///./clinic.db"
+    
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL,
+        connect_args={"check_same_thread": False}
+    )
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base = declarative_base()
+
+SCHEMA DO BANCO DE DADOS:
+─────────────────────────
+
+Tabela: PATIENTS (Pacientes)
+┌──────────────┬─────────┬──────────────────────────────┐
+│ Coluna       │ Tipo    │ Descrição                    │
+├──────────────┼─────────┼──────────────────────────────┤
+│ id           │ INTEGER │ PK - Identificador único     │
+│ name         │ STRING  │ Nome do paciente             │
+│ created_at   │ DATETIME│ Data de criação do registro  │
+└──────────────┴─────────┴──────────────────────────────┘
+
+Tabela: SESSIONS (Sessões de medição)
+┌──────────────────┬─────────┬──────────────────────────────┐
+│ Coluna           │ Tipo    │ Descrição                    │
+├──────────────────┼─────────┼──────────────────────────────┤
+│ id               │ INTEGER │ PK - Identificador único     │
+│ patient_id       │ INTEGER │ FK - Referência ao paciente  │
+│ timestamp        │ DATETIME│ Horário de início da sessão  │
+│ duration_seconds │ FLOAT   │ Duração da medição           │
+│ max_angle_esq    │ FLOAT   │ Ângulo máximo perna ESQ (°)  │
+│ max_angle_dir    │ FLOAT   │ Ângulo máximo perna DIR (°)  │
+│ avg_emg_esq      │ FLOAT   │ EMG médio perna ESQ (µV)     │
+│ avg_emg_dir      │ FLOAT   │ EMG médio perna DIR (µV)     │
+│ raw_data_blob    │ TEXT    │ Dados brutos em JSON         │
+└──────────────────┴─────────┴──────────────────────────────┘
+
+ESTRUTURA DE raw_data_blob (JSON):
+[
+  {
+    "ESQ_angle": 45.3,
+    "DIR_angle": 48.1,
+    "ESQ_emg": 2850,
+    "DIR_emg": 3120,
+    "ESQ_ecg": 3215,
+    "DIR_ecg": 3410,
+    "timestamp": "2025-12-03T15:30:45.123"
+  },
+  ...
+]
+
+ARQUIVO: backend/models.py
+═════════════════════════
+
+Função: Definir modelos ORM que representam tabelas do banco de dados
+
+CLASSE Patient:
+    - Relacionamento 1:N com Session
+    - Atributos: id, name, created_at
+    - Métodos: Herdados de Base (SQLAlchemy)
+
+CLASSE Session:
+    - Relacionamento N:1 com Patient
+    - Atributos: Conforme tabela acima
+    - Métodos: Herdados de Base (SQLAlchemy)
+
+ARQUIVO: backend/main.py
+═════════════════════════
+
+Função: Implementar a API e lógica de servidor
+
+COMPONENTES PRINCIPAIS:
+
+1. CONFIGURAÇÃO CORS:
+   ├─ Permite requisições de qualquer origem
+   ├─ Necessário para comunicação Frontend-Backend
+   └─ Em produção, restringir a domínios específicos
+
+2. DEPENDENCY INJECTION:
+   Função: get_db()
+   ├─ Fornece sessão SQLAlchemy para cada requisição
+   ├─ Fecha conexão automaticamente após uso
+   └─ Padrão: Dependency Injection do FastAPI
+
+3. MODELOS PYDANTIC (Validação):
+   
+   a) PatientCreate:
+      {"name": "João Silva"}
+   
+   b) PatientResponse:
+      {"id": 1, "name": "João Silva", "created_at": "2025-12-03T..."}
+   
+   c) SessionCreate:
+      {
+        "patient_id": 1,
+        "duration_seconds": 30.5,
+        "max_angle_esq": 45.3,
+        "max_angle_dir": 48.1,
+        "avg_emg_esq": 2850,
+        "avg_emg_dir": 3120,
+        "raw_data_blob": "[{...JSON...}]"
+      }
+
+4. RECEPÇÃO DE DADOS UDP:
+   
+   Configuração:
+   ├─ UDP_IP: "0.0.0.0" (escuta em todas as interfaces)
+   ├─ UDP_PORT: 4210
+   └─ socket.setblocking(False) (não-bloqueante)
+   
+   Processamento:
+   ├─ Recepciona pacotes UDP
+   ├─ Parse dos dados (ID, ANGLE, EMG, ECG)
+   ├─ Armazena em estrutura de dados em memória
+   └─ Transmite via WebSocket para clientes conectados
+
+5. ENDPOINTS REST:
+   
+   GET /patients
+   └─ Retorna lista de todos os pacientes
+   
+   GET /patients/{patient_id}
+   └─ Retorna detalhes de um paciente específico
+   
+   GET /patients/{patient_id}/sessions
+   └─ Retorna todas as sessões de um paciente
+   
+   POST /patients
+   └─ Cria novo paciente
+   
+   POST /sessions
+   └─ Cria nova sessão com dados brutos
+
+6. WEBSOCKET:
+   
+   Endpoint: ws://localhost:8000/ws
+   
+   Funcionamento:
+   ├─ Cliente conecta
+   ├─ Servidor mantém conexão aberta
+   ├─ Cada pacote UDP recebido é enviado ao cliente
+   └─ Cliente desconecta
+   
+   Formato de mensagem:
+   {
+     "id_dispositivo": "DIR",
+     "angle": 45.3,
+     "emg": 2850,
+     "ecg": 3215,
+     "timestamp": "2025-12-03T15:30:45.123"
+   }
+
+
+================================================================================
+5. FRONTEND - INTERFACE COM USUÁRIO
+================================================================================
+
+TECNOLOGIA UTILIZADA:
+- Framework: React 19.2 + React Router 7.9
+- Build Tool: Vite 7.2
+- CSS: Tailwind CSS 3.4 + PostCSS
+- Visualização: Recharts (gráficos)
+- Ícones: Lucide React
+- Linting: ESLint
+
+ARQUIVO: frontend/package.json
+═══════════════════════════════
+
+Dependências principais:
+├─ react 19.2.0
+├─ react-dom 19.2.0
+├─ react-router-dom 7.9.6
+├─ recharts 3.5.1 (gráficos)
+├─ tailwindcss 3.4.17 (estilos)
+└─ vite 7.2.4 (bundler)
+
+Scripts disponíveis:
+├─ npm run dev      → Iniciar servidor de desenvolvimento
+├─ npm run build    → Build para produção
+├─ npm run preview  → Visualizar build de produção
+└─ npm run lint     → Verificar código com ESLint
+
+ARQUIVO: frontend/vite.config.js
+═════════════════════════════════
+
+Configuração:
+├─ Plugin React para Hot Module Replacement (HMR)
+├─ Port padrão: 5173
+└─ Proxy opcional para Backend em desenvolvimento
+
+ESTRUTURA DE COMPONENTES:
+═════════════════════════
+
+App.jsx (Componente Raiz)
+└─ Layout principal com navegação
+   ├─ Home.jsx
+   │  └─ Página inicial e listagem de pacientes
+   ├─ Dashboard.jsx
+   │  └─ Visualização em tempo real dos dados
+   ├─ PatientDetails.jsx
+   │  └─ Histórico de sessões do paciente
+   └─ App.css
+      └─ Estilos globais + Tailwind
+
+FLUXO DE DADOS:
+①─ App.jsx recebe dados via props
+②─ Dashboard.jsx conecta ao WebSocket do backend
+③─ Recebe pacotes em tempo real
+④─ Renderiza gráficos com Recharts
+⑤─ Atualiza estado React em cada novo pacote
+
+ESTILOS:
+├─ Tailwind CSS: Utilidade-first CSS framework
+├─ Responsivo: Mobile-first approach
+├─ PostCSS: Processamento de CSS
+└─ ESLint: Verificação de código JavaScript
+
+
+================================================================================
+6. PIPELINE DE ANÁLISE ESTATÍSTICA
+================================================================================
+
+LOCALIZAÇÃO: analysis/ (fora do servidor, execução offline)
+
+SCRIPTS PRINCIPAIS:
+═════════════════════
+
+1. statistical_analysis.py
+   Função: Análise de variação angular
+   ├─ Classe: AngleDeltaAnalyzer
+   ├─ Método: extract_session_data()
+   ├─ Método: calculate_deltas()
+   ├─ Método: shapiro_wilk_test()
+   ├─ Método: generate_plots()
+   └─ Saída: Excel, CSV, PNG
+
+2. emg_analysis.py
+   Função: Análise de ativação muscular (EMG)
+   ├─ Classe: EMGDeltaAnalyzer
+   ├─ Estrutura idêntica a statistical_analysis.py
+   └─ Diferença: Extrai campos ESQ_emg e DIR_emg
+
+3. ecg_analysis.py
+   Função: Análise cardiovascular (ECG)
+   ├─ Classe: ECGDeltaAnalyzer
+   ├─ Estrutura idêntica a statistical_analysis.py
+   └─ Diferença: Extrai campos ESQ_ecg e DIR_ecg
+
+4. ttest_pareado.py
+   Função: Comparação bilateral usando t-test pareado
+   ├─ Classe: PairedTTestAnalyzer
+   ├─ Método: extract_session_data()
+   ├─ Método: calculate_deltas()
+   ├─ Método: paired_ttest()
+   └─ Calcula: t-statistic, p-value, Cohen's d, CI 95%
+
+FLUXO DE ANÁLISE:
+═════════════════
+
+Stage 1: EXTRAÇÃO DE DADOS
+├─ Conecta ao clinic.db
+├─ Consulta sessões 19-23
+├─ Carrega raw_data_blob (JSON)
+└─ Estrutura em dicionários Python
+
+Stage 2: CÁLCULO DE DELTAS
+├─ Para cada sessão: delta = max(medidas) - min(medidas)
+├─ Armazena deltas_esq[] e deltas_dir[]
+└─ Calcula estatísticas descritivas
+
+Stage 3: TESTE DE NORMALIDADE (Shapiro-Wilk)
+├─ Função: scipy.stats.shapiro()
+├─ H₀: Dados vêm de distribuição normal
+├─ Resultado: estatística-w, valor-p
+├─ Se p > 0.05: Dados são normais ✓
+└─ Se p ≤ 0.05: Dados não são normais ✗
+
+Stage 4: TESTE DE COMPARAÇÃO BILATERAL (Paired t-test)
+├─ Função: scipy.stats.ttest_rel()
+├─ Compara deltas_esq vs deltas_dir (pareados)
+├─ Calcula: t-statistic, valor-p, mean difference
+├─ Calcula: Cohen's d = mean_diff / std_diff
+└─ Calcula: IC 95% = mean_diff ± 1.96 * SE
+
+Stage 5: EXPORTAÇÃO DE RESULTADOS
+├─ Excel (.xlsx) com 4 abas:
+│  ├─ Dados brutos
+│  ├─ Estatísticas ESQ
+│  ├─ Estatísticas DIR
+│  └─ Resultados do Shapiro-Wilk / t-test
+├─ CSV (.csv) com resultados
+└─ PNG (.png) boxplot 300 DPI
+
+BIBLIOTECAS PYTHON UTILIZADAS:
+═════════════════════════════════
+
+import sqlite3              → Conexão ao banco SQLite
+import json                → Parse de raw_data_blob
+import pandas              → Manipulação de dados (v2.3.3)
+import numpy               → Operações numéricas (v2.3.5)
+from scipy import stats    → Testes estatísticos (v1.16.3)
+import matplotlib.pyplot   → Gráficos (v3.10.7)
+import seaborn            → Estilo de gráficos (v0.13.2)
+import openpyxl           → Escrita em Excel (v3.1.5)
+
+EXEMPLO DE EXECUÇÃO:
+═════════════════════
+
+Terminal:
+$ cd analysis
+$ python statistical_analysis.py
+
+Saída esperada:
+✓ Conectado ao banco de dados: ../backend/clinic.db
+✓ 5 sessão(ões) encontrada(s)
+  Sessão 19: ✓ Dados extraídos
+  Sessão 20: ✓ Dados extraídos
+  Sessão 21: ✓ Dados extraídos
+  Sessão 22: ✓ Dados extraídos
+  Sessão 23: ✓ Dados extraídos
+
+ESTATÍSTICA DESCRITIVA - ÂNGULO (perna esquerda)
+Média: 24.554 °
+Mediana: 23.200 °
+Desvio Padrão: 14.809 °
+Coeficiente de Variação: 60.28 %
+Min: 5.352 °
+Q1: 12.776 °
+Q3: 35.331 °
+Max: 45.250 °
+
+TESTE DE NORMALIDADE - SHAPIRO-WILK
+Variável: Ângulo ESQ
+W = 0.7689
+p-value = 0.6118
+Resultado: NORMAL ✓
+
+[Gráfico PNG gerado]
+[Arquivo Excel gerado]
+[Arquivo CSV gerado]
+
+
+================================================================================
+7. FLUXO DE DADOS COMPLETO
+================================================================================
+
+TRAJETÓRIA DO DADO:
+═════════════════════
+
+┌──────────────────────────────────────────────────────────────┐
+│ 1. HARDWARE (ESP32)                                          │
+│                                                              │
+│    Sensores leem dados continuamente                        │
+│    ├─ Aceleração + Giroscópio (MPU6050)                    │
+│    ├─ EMG (ADC GPIO 34)                                    │
+│    └─ ECG (ADC GPIO 35)                                    │
+│                                                              │
+│    Processamento no ESP32:                                  │
+│    ├─ Complementary filter para ângulo                     │
+│    └─ Montagem de pacote UDP                               │
+└──────────────────────────────────────────────────────────────┘
+                            ↓
+              UDP: "DIR|45.3|2850|3215\n"
+                            ↓
+┌──────────────────────────────────────────────────────────────┐
+│ 2. REDE (WiFi UDP)                                           │
+│                                                              │
+│    ~100 pacotes/segundo                                    │
+│    Porto: 4210                                              │
+└──────────────────────────────────────────────────────────────┘
+                            ↓
+┌──────────────────────────────────────────────────────────────┐
+│ 3. BACKEND (FastAPI Uvicorn)                               │
+│                                                              │
+│    ├─ Socket UDP recebe pacotes                            │
+│    ├─ Parse dos dados (ID, ANGLE, EMG, ECG)              │
+│    ├─ Armazena em memória (buffer)                         │
+│    └─ Transmite via WebSocket para clientes conectados     │
+│                                                              │
+│    Endpoint: ws://localhost:8000/ws                        │
+└──────────────────────────────────────────────────────────────┘
+                    ↙                      ↘
+    ┌──────────────────────┐    ┌──────────────────────┐
+    │ 4a. FRONTEND         │    │ 4b. ARMAZENAMENTO    │
+    │                      │    │                      │
+    │ ├─ WebSocket conecta │    │ ├─ Sessão criada     │
+    │ ├─ Recebe pacotes    │    │ ├─ raw_data_blob     │
+    │ │   em tempo real    │    │ │   preenchido        │
+    │ ├─ Renderiza         │    │ ├─ Salvo em          │
+    │ │   Dashboard        │    │ │   clinic.db         │
+    │ └─ Exibe gráficos    │    │ └─ Query disponível  │
+    │                      │    │                      │
+    │ (Visualização)       │    │ (Persistência)       │
+    └──────────────────────┘    └──────────────────────┘
+                                        ↓
+┌──────────────────────────────────────────────────────────────┐
+│ 5. ANÁLISE OFFLINE (Scripts Python)                        │
+│                                                              │
+│    APÓS a sessão ser concluída:                            │
+│    ├─ statistical_analysis.py                              │
+│    │  ├─ Conecta ao clinic.db                             │
+│    │  ├─ Carrega dados das sessões 19-23                  │
+│    │  ├─ Calcula deltas por sessão                        │
+│    │  ├─ Teste Shapiro-Wilk para normalidade              │
+│    │  └─ Gera relatórios (Excel, CSV, PNG)               │
+│    │                                                       │
+│    ├─ emg_analysis.py (idêntico, para EMG)               │
+│    ├─ ecg_analysis.py (idêntico, para ECG)               │
+│    │                                                       │
+│    └─ ttest_pareado.py                                    │
+│       ├─ t-test pareado (ESQ vs DIR)                      │
+│       ├─ Calcula tamanho de efeito (Cohen's d)           │
+│       ├─ IC 95% para cada variável                       │
+│       └─ Relatório final integrado                       │
+│                                                              │
+│    (Análise Estatística)                                   │
+└──────────────────────────────────────────────────────────────┘
+                            ↓
+┌──────────────────────────────────────────────────────────────┐
+│ 6. SAÍDA DE RESULTADOS                                      │
+│                                                              │
+│    Formatos:                                               │
+│    ├─ Excel (.xlsx):                                      │
+│    │  ├─ Dados brutos (JSON estruturado)                  │
+│    │  ├─ Estatísticas descritivas por perna               │
+│    │  └─ Resultados de testes estatísticos               │
+│    │                                                       │
+│    ├─ CSV (.csv):                                         │
+│    │  └─ Dados tabulares para análise externa            │
+│    │                                                       │
+│    ├─ PNG (.png):                                         │
+│    │  └─ Boxplots de distribuição (300 DPI)              │
+│    │                                                       │
+│    ├─ TXT (.txt):                                         │
+│    │  ├─ README com explicação didática                  │
+│    │  ├─ README_PT-BR (tradução para português)          │
+│    │  └─ Glossário de termos técnicos                    │
+│    │                                                       │
+│    └─ Relatórios clínicos gerados                        │
+│       ├─ README_TEST_T.txt (pareado)                      │
+│       ├─ README_FINAL.txt (resumo geral)                  │
+│       └─ INDICE_ANALISES.txt (navegação)                 │
+│                                                              │
+│    (Documentação)                                          │
+└──────────────────────────────────────────────────────────────┘
+
+EXEMPLO DE FLUXO DE 1 PACOTE:
+
+Tempo: 15:30:45.123
+ESP32 DIR lê sensores → "DIR|45.3|2850|3215\n"
+                            ↓
+FastAPI recebe → parse → {
+                           id: "DIR",
+                           angle: 45.3,
+                           emg: 2850,
+                           ecg: 3215,
+                           ts: "15:30:45.123"
+                         }
+                            ↓
+Broadcast via WebSocket → Frontend recebe
+                            ↓
+React atualiza gráfico → Usuário visualiza em tempo real
+                            ↓
+Ao final da sessão:
+Dados salvos em raw_data_blob (JSON) → clinic.db
+                            ↓
+Análise posterior:
+statistical_analysis.py acessa → Shapiro-Wilk test
+                            ↓
+Resultado: p-value, relatório gerado
+
+
+================================================================================
+8. FERRAMENTAS E TECNOLOGIAS
+================================================================================
+
+STACK TECNOLÓGICO:
+═════════════════════
+
+HARDWARE:
+├─ Microcontrolador: ESP32 (2 unidades)
+├─ Sensores movimento: MPU6050 (4 unidades)
+├─ Sensores analógicos: ADC integrado (EMG, ECG)
+└─ Comunicação: WiFi (UDP)
+
+BACKEND:
+├─ Linguagem: Python 3.10+
+├─ Framework: FastAPI (Starlette + Pydantic)
+├─ Servidor: Uvicorn
+├─ ORM: SQLAlchemy 2.0
+├─ Banco de dados: SQLite3
+└─ Dependências:
+   ├─ fastapi 0.123.0
+   ├─ uvicorn 0.38.0
+   ├─ sqlalchemy 2.0.44
+   ├─ pydantic 2.12.5
+   └─ websockets 15.0.1
+
+FRONTEND:
+├─ Linguagem: JavaScript (ES6+) / JSX
+├─ Runtime: Node.js
+├─ Framework: React 19.2
+├─ Roteamento: React Router 7.9
+├─ Build: Vite 7.2 (ES modules nativo)
+├─ CSS: Tailwind CSS 3.4 + PostCSS 8.5
+├─ Visualização: Recharts 3.5.1
+├─ Ícones: Lucide React
+├─ Lint: ESLint 9.39.1
+└─ Dependências totais: 19 packages
+
+ANÁLISE:
+├─ Linguagem: Python 3.10+
+├─ Manipulação: pandas 2.3.3, numpy 2.3.5
+├─ Estatística: scipy 1.16.3
+├─ Visualização: matplotlib 3.10.7, seaborn 0.13.2
+├─ Excel: openpyxl 3.1.5
+└─ Banco: sqlite3 (stdlib)
+
+VERSÃO DE CADA FERRAMENTA:
+═════════════════════════════
+
+Backend (requirements.txt):
+├─ fastapi==0.123.0          [HTTP framework]
+├─ uvicorn==0.38.0           [ASGI server]
+├─ sqlalchemy==2.0.44         [ORM]
+├─ pydantic==2.12.5          [Data validation]
+├─ pydantic_core==2.41.5     [Core pydantic]
+├─ starlette==0.50.0         [ASGI toolkit]
+├─ websockets==15.0.1        [WebSocket protocol]
+├─ anyio==4.12.0             [Async I/O]
+├─ h11==0.16.0               [HTTP parser]
+├─ idna==3.11                [Domain parsing]
+├─ greenlet==3.2.4           [Concurrency]
+└─ typing_extensions==4.15.0 [Type hints]
+
+Frontend (package.json):
+├─ react==19.2.0             [UI library]
+├─ react-dom==19.2.0         [DOM binding]
+├─ react-router-dom==7.9.6   [Routing]
+├─ recharts==3.5.1           [Charts]
+├─ tailwindcss==3.4.17       [CSS framework]
+├─ vite==7.2.4               [Build tool]
+├─ postcss==8.5.6            [CSS processing]
+├─ autoprefixer==10.4.22     [CSS vendor prefixes]
+├─ eslint==9.39.1            [Linter]
+└─ lucide-react==0.555.0     [Icons]
+
+Análise (requirements.txt):
+├─ pandas==2.3.3             [Data manipulation]
+├─ numpy==2.3.5              [Numerical]
+├─ scipy==1.16.3             [Scientific]
+├─ matplotlib==3.10.7        [Plotting]
+├─ seaborn==0.13.2           [Statistical viz]
+├─ openpyxl==3.1.5           [Excel export]
+└─ sqlite3 (built-in)        [Database]
+
+MOTIVO DE CADA ESCOLHA:
+═════════════════════════
+
+FastAPI + Uvicorn:
+├─ Razão: Framework moderno, assíncrono, performático
+├─ WebSocket nativo para comunicação real-time
+├─ Auto-documentação com OpenAPI/Swagger
+└─ Validation automática com Pydantic
+
+SQLAlchemy:
+├─ Razão: ORM poderoso, agnóstico ao banco
+├─ Permite migração futura para PostgreSQL/MySQL
+├─ Relacionamentos bem definidos (1:N)
+└─ Suporte a tipos de dados complexos
+
+React + Vite:
+├─ Razão: Desenvolvimento rápido com HMR
+├─ SPA (Single Page Application) responsiva
+├─ Ecossistema maduro e comunidade ativa
+└─ Build otimizado e bundle pequeno
+
+SQLite:
+├─ Razão: Simplicidade para protótipo
+├─ Sem servidor externo necessário
+├─ Portável (arquivo único)
+└─ Upgrade futuro: PostgreSQL para produção
+
+Pandas + NumPy + SciPy:
+├─ Razão: Stack padrão em Data Science
+├─ scipy.stats: testes estatísticos confiáveis
+├─ pandas: análise tabular intuitiva
+└─ NumPy: cálculos numéricos otimizados
+
+Matplotlib + Seaborn:
+├─ Razão: Visualizações publicáveis
+├─ Exportação de alta qualidade (PNG 300 DPI)
+├─ Estilo profissional com Seaborn
+└─ Personalização completa de gráficos
+
+
+================================================================================
+9. METODOLOGIA ESTATÍSTICA
+================================================================================
+
+TESTES IMPLEMENTADOS:
+═════════════════════
+
+1. SHAPIRO-WILK TEST (Teste de Normalidade)
+   ──────────────────────────────────────────
+   
+   Objetivo: Validar se dados vêm de distribuição normal
+   
+   Hipóteses:
+   - H₀: Os dados vêm de uma distribuição normal
+   - H₁: Os dados NÃO vêm de uma distribuição normal
+   
+   Fórmula:
+            (∑ aᵢ x₍ᵢ₎)²
+   W = ──────────────────
+       ∑ (xᵢ - x̄)²
+   
+   Onde:
+   - aᵢ = coeficientes Shapiro-Wilk (tabelados)
+   - x₍ᵢ₎ = valores ordenados
+   - x̄ = média
+   
+   Interpretação:
+   - Se p > 0.05: Dados são normais ✓ (usar testes paramétricos)
+   - Se p ≤ 0.05: Dados não são normais ✗ (usar testes não-paramétricos)
+   
+   Implementação:
+   from scipy.stats import shapiro
+   w_stat, p_value = shapiro(data)
+   
+   Resultado esperado no projeto:
+   ├─ Ângulo ESQ: W=0.769, p=0.612 → NORMAL
+   ├─ Ângulo DIR: W=0.932, p=0.275 → NORMAL
+   ├─ EMG ESQ: W=0.824, p=0.508 → NORMAL
+   ├─ EMG DIR: W=0.759, p=0.906 → NORMAL
+   ├─ ECG ESQ: W=0.558, p=0.135 → NORMAL
+   └─ ECG DIR: W=0.671, p=0.299 → NORMAL
+
+2. PAIRED T-TEST (T-test pareado)
+   ────────────────────────────────
+   
+   Objetivo: Comparar duas medidas do mesmo indivíduo
+   
+   Uso: Comparação bilateral (ESQ vs DIR)
+   
+   Hipóteses:
+   - H₀: Média_ESQ = Média_DIR (sem diferença)
+   - H₁: Média_ESQ ≠ Média_DIR (há diferença)
+   
+   Fórmula:
+              d̄
+   t = ───────────────
+       Sₑ = S_d / √n
+   
+   Onde:
+   - d̄ = média das diferenças pareadas
+   - S_d = desvio padrão das diferenças
+   - n = número de pares
+   - Sₑ = erro padrão
+   
+   Implementação:
+   from scipy.stats import ttest_rel
+   t_stat, p_value = ttest_rel(esq_data, dir_data)
+   
+   Resultado esperado no projeto:
+   ├─ Ângulo: t=-1.075, p=0.343 → NÃO SIGNIFICATIVO
+   ├─ EMG: t=-4.391, p=0.012 → SIGNIFICATIVO ⭐
+   └─ ECG: t=-1.046, p=0.354 → NÃO SIGNIFICATIVO
+
+3. TAMANHO DE EFEITO - COHEN'S D
+   ───────────────────────────────
+   
+   Objetivo: Medir magnitude prática da diferença (independente de n)
+   
+   Fórmula (para dados pareados):
+            |d̄|
+   d = ─────────────
+       √(S_d²)
+   
+   Interpretação:
+   ├─ |d| < 0.2: Efeito negligenciável
+   ├─ 0.2 ≤ |d| < 0.5: Efeito pequeno
+   ├─ 0.5 ≤ |d| < 0.8: Efeito médio
+   └─ |d| ≥ 0.8: Efeito grande
+   
+   Resultado esperado no projeto:
+   ├─ Ângulo: d=-0.481 → Efeito pequeno a médio
+   ├─ EMG: d=-1.964 → Efeito MUITO GRANDE ⭐⭐⭐
+   └─ ECG: d=-0.468 → Efeito pequeno a médio
+
+4. INTERVALO DE CONFIANÇA 95%
+   ────────────────────────────
+   
+   Objetivo: Estimativa do intervalo onde verdadeira média provavelmente está
+   
+   Fórmula:
+   IC = d̄ ± (1.96 × Sₑ)
+   
+   Onde:
+   - 1.96 = valor crítico para 95% (distribuição normal)
+   - Sₑ = erro padrão da diferença
+   
+   Interpretação:
+   ├─ Se IC contém zero: Diferença não é significativa
+   ├─ Se IC não contém zero: Diferença é significativa
+   └─ IC mais estreito: Estimativa mais precisa
+
+CÁLCULO DE DELTA:
+═════════════════
+
+Para cada sessão, calcula-se:
+Delta = Máximo - Mínimo
+
+Exemplos no projeto:
+├─ Ângulo: Delta = max(45.3, 43.1, 44.8, ...) - min(...)
+├─ EMG: Delta = max(2850, 2920, 2755, ...) - min(...)
+└─ ECG: Delta = max(3215, 3310, 3180, ...) - min(...)
+
+Justificativa: Delta representa variabilidade/ampliatude de movimento
+
+SIGNIFICÂNCIA ESTATÍSTICA vs CLÍNICA:
+══════════════════════════════════════
+
+Significância Estatística:
+├─ p < 0.05: Improvável que resultado seja por acaso
+├─ Baseado em tamanho de amostra
+└─ Pode ser significativo com efeito pequeno se n grande
+
+Significância Clínica:
+├─ Cohen's d grande (> 0.8)
+├─ Diferença prática e mensurável
+├─ Importante para paciente
+└─ Independente de tamanho de amostra
+
+Exemplo no projeto (EMG):
+├─ p = 0.012 → Estatisticamente significativo ✓
+├─ d = -1.964 → Clinicamente significativo (grande efeito) ✓
+└─ Conclusão: Ambos indicam diferença REAL e IMPORTANTE
+
+
+================================================================================
+10. ROTEIRO DE EXECUÇÃO
+================================================================================
+
+SETUP INICIAL DO SISTEMA:
+═════════════════════════
+
+Pré-requisitos:
+├─ Python 3.10+ instalado
+├─ Node.js 18+ instalado
+├─ Acesso a WiFi
+├─ Hardware (2x ESP32 + sensores)
+└─ Git para controle de versão
+
+PASSO 1: CLONAR O REPOSITÓRIO
+────────────────────────────
+
+$ git clone https://github.com/ThomazArruda/projeto_pbl.git
+$ cd projeto_pbl
+
+PASSO 2: CONFIGURAR HARDWARE
+──────────────────────────────
+
+a) ESP32 (2 unidades)
+   ├─ Instalar Arduino IDE / PlatformIO
+   ├─ Abrir firmware_direita.ino e firmware_esquerda.ino
+   ├─ Configurar SSID/Password WiFi:
+   │  const char* ssid = "Seu_WiFi";
+   │  const char* password = "Sua_Senha";
+   ├─ Configurar IP do servidor:
+   │  const char* host_ip = "192.168.1.100";
+   ├─ Upload para ambos ESP32
+   └─ Verificar conexão serial
+
+b) Conectar sensores:
+   ├─ MPU6050 via I2C (SDA/SCL)
+   ├─ EMG no GPIO 34 (ADC)
+   ├─ ECG no GPIO 35 (ADC)
+   └─ Testes de calibração
+
+PASSO 3: INSTALAR DEPENDÊNCIAS BACKEND
+─────────────────────────────────────────
+
+$ cd backend
+$ python -m venv venv
+$ source venv/bin/activate  # Linux/Mac
+$ venv\Scripts\activate     # Windows
+
+$ pip install -r requirements.txt
+
+Verificar instalação:
+$ python -c "import fastapi; print(fastapi.__version__)"
+
+PASSO 4: INICIAR SERVIDOR BACKEND
+──────────────────────────────────
+
+$ cd backend
+$ uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+Saída esperada:
+INFO:     Uvicorn running on http://0.0.0.0:8000
+INFO:     Application startup complete
+
+Acessar documentação:
+http://localhost:8000/docs (Swagger UI)
+
+PASSO 5: INSTALAR DEPENDÊNCIAS FRONTEND
+──────────────────────────────────────────
+
+$ cd frontend
+$ npm install
+
+Verificar:
+$ npm list react
+
+PASSO 6: INICIAR SERVIDOR FRONTEND
+────────────────────────────────────
+
+$ cd frontend
+$ npm run dev
+
+Saída esperada:
+  VITE v7.2.4  ready in 234 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  press h to show help
+
+Acessar em browser:
+http://localhost:5173
+
+PASSO 7: TESTAR COMUNICAÇÃO
+────────────────────────────
+
+a) Verificar WebSocket:
+   ├─ Abrir DevTools do navegador (F12)
+   ├─ Ir para console
+   ├─ Verificar se WebSocket está conectado
+   └─ Esperar por dados dos ESP32
+
+b) Verificar API REST:
+   $ curl http://localhost:8000/patients
+   (deve retornar lista JSON)
+
+c) Verificar banco de dados:
+   $ sqlite3 clinic.db
+   sqlite> SELECT * FROM patients;
+   sqlite> .quit
+
+PASSO 8: EXECUTAR ANÁLISES
+───────────────────────────
+
+Após coletar dados em sessões (19-23):
+
+$ cd analysis
+$ pip install -r requirements.txt
+
+a) Análise Angular:
+   $ python statistical_analysis.py
+   └─ Gera: analise_angular_*.xlsx, .csv, .png
+
+b) Análise EMG:
+   $ python emg_analysis.py
+   └─ Gera: analise_emg_*.xlsx, .csv, .png
+
+c) Análise ECG:
+   $ python ecg_analysis.py
+   └─ Gera: analise_ecg_*.xlsx, .csv, .png
+
+d) Análise T-Test Pareado:
+   $ python ttest_pareado.py
+   └─ Gera: ttest_pareado_*.xlsx, .csv, README_TEST_T.txt
+
+PASSO 9: VERIFICAR SAÍDAS
+──────────────────────────
+
+Verificar arquivos gerados:
+$ ls -la analysis/*.xlsx
+$ ls -la analysis/*.csv
+$ ls -la analysis/*.png
+$ ls -la analysis/README_*.txt
+
+PASSO 10: GERAR RELATÓRIOS
+────────────────────────────
+
+Abrir arquivos Excel para visualizar:
+├─ analise_angular_completa_*.xlsx
+├─ analise_emg_completa_*.xlsx
+├─ analise_ecg_completa_*.xlsx
+└─ ttest_pareado_resultados.xlsx
+
+Ler documentação:
+├─ README.txt (metodologia Shapiro-Wilk)
+├─ README_EMG.txt (análise EMG)
+├─ README_ECG.txt (análise ECG)
+├─ README_TEST_T.txt (t-test pareado)
+├─ README_TEST_T_PT-BR.txt (tradução português)
+├─ README_FINAL.txt (resumo geral)
+└─ INDICE_ANALISES.txt (navegação)
+
+BUILD PARA PRODUÇÃO:
+════════════════════
+
+Frontend:
+$ cd frontend
+$ npm run build
+$ npm run preview
+
+Backend:
+$ cd backend
+$ pip install gunicorn
+$ gunicorn -w 4 -b 0.0.0.0:8000 main:app
+
+DEPLOYMENT:
+═══════════
+
+Opções:
+├─ Heroku (Backend)
+├─ Vercel (Frontend)
+├─ AWS/Azure/GCP (Full stack)
+├─ Docker (Containerização)
+└─ VPS (Self-hosted)
+
+Arquivo Docker example:
+FROM python:3.10
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+COPY . .
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0"]
+
+TROUBLESHOOTING:
+════════════════
+
+Problema: ESP32 não conecta WiFi
+Solução:
+├─ Verificar credenciais WiFi
+├─ Verificar IP do servidor
+├─ Testar conectividade rede
+└─ Ressetear ESP32
+
+Problema: Backend não recebe dados UDP
+Solução:
+├─ Verificar firewall
+├─ Verificar porta 4210 aberta
+├─ Testar com netcat: nc -ul 4210
+└─ Verificar logs do Uvicorn
+
+Problema: Frontend não conecta WebSocket
+Solução:
+├─ Verificar DevTools console
+├─ Verificar URL do servidor
+├─ Verificar CORS no backend
+├─ Testar com curl localhost:8000/docs
+
+Problema: Análise Python não encontra clinic.db
+Solução:
+├─ Verificar caminho relativo: ../backend/clinic.db
+├─ Verificar permissões de arquivo
+├─ Verificar se banco existe
+└─ Executar análise do diretório correto
+
+
+================================================================================
+                              CONCLUSÃO
+================================================================================
+
+Este sistema implementa uma arquitetura moderna de monitoramento e análise
+de dados biomecânicos, combinando:
+
+✓ Captura de hardware em tempo real (ESP32 + sensores)
+✓ Processamento e armazenamento (FastAPI + SQLite)
+✓ Visualização interativa (React + Recharts)
+✓ Análise estatística rigorosa (SciPy + Pandas)
+✓ Documentação científica (Relatórios formatados)
+
+A metodologia garante:
+✓ Qualidade de dados (validação em múltiplas camadas)
+✓ Rigor estatístico (testes padronizados)
+✓ Reprodutibilidade (scripts versionados)
+✓ Acessibilidade (múltiplos formatos de saída)
+
+Próximos passos sugeridos:
+1. Integração com prontuário eletrônico do paciente
+2. Machine learning para predição de evolução
+3. Análise de frequência de EMG (FFT)
+4. Comparação com benchmarks clínicos
+5. Escalabilidade para múltiplos pacientes simultâneos
+
+================================================================================
+                          FIM DA DOCUMENTAÇÃO
+================================================================================

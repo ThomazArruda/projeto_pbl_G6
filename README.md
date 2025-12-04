@@ -1,6 +1,6 @@
-# NeuroPasso 🧠🦵
+# HipTech 🧠🦵
 
-**NeuroPasso** é uma aplicação web completa para monitoramento e reabilitação de pacientes com deficiências motoras. O sistema visualiza dados em tempo real de sensores (Ângulo, EMG, ECG) conectados a microcontroladores ESP32, permitindo que fisioterapeutas acompanhem a evolução do tratamento e utilizem biofeedback visual.
+**HipTech** é uma aplicação web completa para monitoramento e reabilitação de pacientes com deficiências motoras. O sistema visualiza dados em tempo real de sensores (Ângulo, EMG, ECG) conectados a microcontroladores ESP32, permitindo que fisioterapeutas acompanhem a evolução do tratamento e utilizem biofeedback visual.
 
 ---
 
@@ -87,7 +87,7 @@ Você precisará de dois terminais abertos: um para o Backend (Servidor) e outro
 
 ---
 
-## 📖 Como Usar o NeuroPasso
+## 📖 Como Usar o HipTech
 
 1.  **Tela Inicial (Home):**
     *   Você verá a lista de pacientes cadastrados.
